@@ -84,3 +84,48 @@ The spectral sub-sensor has raw per-channel thresholds but no Android type mappi
 3. CHRE nanoapp -- Custom nanoapp with raw sensor access inside AOC
 4. Camera HAL sniffing -- Intercept VD6282 spectral reads done by camera for AWB
 5. Kernel module for AOC I2C passthrough -- Expose AOC's i2c0 to Linux
+
+## Additional Findings (continued exploration)
+
+### persist.vendor.debug.sensor.hal.show_hidden_sensors
+Setting this property to "1" and restarting the sensor HAL (kill PID, init auto-restarts) revealed 3 previously hidden sensors:
+- S3908 Touch Gesture Sensor (type 65543) — Synaptics
+- MMC56X3X Magnetometer 0-Uncalibrated (type 65553) — with USE_RAW_SENSOR permission
+- MMC56X3X Magnetometer 1-Uncalibrated (type 65553) — with USE_RAW_SENSOR permission
+Plus debug fusion sensors (Gyroscope Bias, Corrected Gyroscope, etc.)
+
+**No VD6282 spectral/color sensor appeared.** The spectral sub-sensor is not registered as an Android sensor type — it only exists as an AOC-internal sub-sensor.
+
+### Factory Calibration Discovery
+Found at /mnt/vendor/persist/sensors/registry/vd6282_spectral_fac_cal.reg:
+    +/fac_cal/dev/vd6282/0/spectral
+    dark_r=0.0  dark_g=0.0  dark_b=0.0  dark_ir=0.0  dark_clr1=0.0  dark_clr2=0.0
+    rals_r=950.9  rals_g=1118.0  rals_b=299.0  rals_clr1=4909.1  rals_clr2=4933.0  rals_ir=2577.4
+    rals_flk=123.0
+
+This proves the AOC reads all 6 spectral channels during factory calibration. The channel names are: R, G, B, IR, CLR1 (Clear channel 1), CLR2 (Clear channel 2).
+
+### AOC Interface Inventory
+- /dev/aoc (char 493,0) — main AOC device, system:system 0660
+- /dev/acd-com.google.usf (char 492,0) — USF sensor channel, system:system 0660
+- /dev/acd-com.google.chre (char 492,2) — CHRE nanoapp channel
+- /dev/acd-aocx_control (char 491,5) — AOC control, root only
+- usf_sh_mem_doorbell — shared memory doorbell for USF
+
+### HAL String Analysis
+The USF HAL (/vendor/lib64/sensors.usf.so) contains:
+- "com.google.sensor.color" — sensor type string, but NOT registered
+- "spectral" — sensor category string
+- "persist.vendor.debug.sensor.hal.show_hidden_sensors" — debug property
+- "com.google.sensor.rear_light" — the type that IS registered (single lux)
+
+### Conclusion
+The VD6282 spectral sub-sensor's raw channels are ONLY accessible inside the AOC. The Android-side HAL (sensors.usf.so) has code for a "color" sensor type but doesn't register it. The spectral data is used internally by the AOC for:
+1. Factory calibration (vd6282_spectral_fac_cal.reg)
+2. Lux calculation (rls sub-sensor applies lux_scale)
+3. Auto brightness fusion (combines ALS + RLS)
+
+To unlock raw channels, we need to either:
+- Modify the AOC firmware to register the spectral sub-sensor as an Android sensor
+- Find a runtime command via /dev/acd-com.google.usf to reconfigure the output
+- Write a CHRE nanoapp that reads the spectral sub-sensor and exports it
