@@ -129,3 +129,33 @@ To unlock raw channels, we need to either:
 - Modify the AOC firmware to register the spectral sub-sensor as an Android sensor
 - Find a runtime command via /dev/acd-com.google.usf to reconfigure the output
 - Write a CHRE nanoapp that reads the spectral sub-sensor and exports it
+
+## Deep Dive: USF Protocol and Channel Sniffing
+
+### AOC Channel Architecture (from AOSP source)
+The AOC channel driver (aoc_channel_dev.ko) provides char devices for IPC:
+- Max message size: 1024 bytes
+- Services: com.google.usf, com.google.usf.non_wake_up, usf_sh_mem_doorbell
+- Protocol: FlatBuffer-based (UsfReq/UsfResp messages)
+
+Key USF HAL symbols discovered:
+- UsfMsgRegSampleChannelReqBuilder — register a sample channel
+- UsfMsgUnregSampleChannelReqBuilder — unregister
+- UsfMsgRegSampleChannelResp — registration response
+- SendSyncRequest/SendRequest — send messages to AOC
+- Sensor::Activate — activate a sensor on the AOC
+
+### Blocked Approaches
+- strace on sensor HAL: ptrace denied even with SELinux permissive (PR_SET_DUMPABLE=0 or seccomp)
+- Direct USF channel read: blocks (HAL holds exclusive access)
+- CHRE test client: not present on device
+
+### Key Insight: "com.google.sensor.color" Type
+The USF HAL binary contains the string "com.google.sensor.color" which is a sensor type string. However, it is NOT registered as an Android sensor even with show_hidden_sensors=1. This type likely maps to the spectral sub-sensor but the AOC firmware does not expose it on this device variant.
+
+### Recommended Next Steps (ordered by feasibility)
+1. **Modify cheetah_proto.reg** to add sensor_type mapping for spectral sub-sensor, reboot. This is the simplest approach but requires /vendor modification.
+2. **Build a native USF client** that opens /dev/acd-com.google.usf and sends FlatBuffer messages to register a sample channel for the spectral sub-sensor directly.
+3. **Patch the sensors.usf.so** to register the color sensor type during initialization.
+4. **Write a custom CHRE nanoapp** via /dev/acd-com.google.chre that reads VD6282 spectral data from inside the AOC.
+5. **Ask the primary session** (kernel work) if they can add an I2C passthrough to expose the AOC's i2c0 bus to Linux.
