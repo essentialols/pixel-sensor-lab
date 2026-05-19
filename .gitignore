@@ -1,3 +1,5 @@
 .claude/
 .project-state/
 *.DS_Store
+tools/spectral_usf/libs/
+tools/spectral_usf/spectral_reader

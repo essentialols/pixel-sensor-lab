@@ -1,0 +1,57 @@
+- id: E001
+  date: 2026-05-19
+  session: 3
+  name: Registry patch - hidden=0 on spectral sub-sensor
+  script: tools/unlock_spectral.sh
+  purpose: Test if adding hidden=0 to the spectral sensor registry node exposes it to Android
+  result: No effect. The hidden property only controls visibility of ALREADY-registered sensors. The spectral sensor is never registered by the AOC.
+  verdict: DEAD_END
+
+- id: E002
+  date: 2026-05-19
+  session: 3
+  name: HAL binary patch - PopulateHalSensorInfo jump table
+  script: "python3 one-liner: patch byte at offset 0x13289 from 0x00 to 0x9c"
+  purpose: Map AOC type 12 (spectral) to com.google.sensor.color (0x10008) in the HAL's type switch
+  result: Patch correct but ineffective. CreateHalClientSensorList has a higher-level filter that prevents type 12 from getting a BasicSensor object.
+  verdict: PARTIAL - patch is valid but needs a second patch
+
+- id: E003
+  date: 2026-05-19
+  session: 3
+  name: UsfSpectralApi native client - connection test
+  script: tools/spectral_usf/spectral_reader.cpp
+  purpose: Connect to AOC via libusf.so's UsfSpectralApi and receive spectral data
+  result: API connects, discovers 44 sensors including VD6282 Spectral (type 12, handle 18). ConnectCallback fires when invoked manually. But automatic event dispatch requires transport thread event loop.
+  verdict: PROGRESS
+
+- id: E004
+  date: 2026-05-19
+  session: 3
+  name: Camera-triggered spectral activation
+  script: "adb shell am start -n com.google.android.GoogleCamera/com.android.camera.CameraLauncher"
+  purpose: Check if opening the camera creates a SpectralApi session that our tool can use
+  result: Camera does not create a new spectral sensor subscription. Only RLS remains as client.
+  verdict: DEAD_END
+
+- id: E005
+  date: 2026-05-19
+  session: 3
+  name: Session cookie injection - RAW SPECTRAL DATA
+  script: tools/spectral_usf/spectral_reader.cpp
+  purpose: Bypass UsfSpectralApi session management by calling StartSampling on internal UsfApiImpl and injecting the returned cookie into session slot 0
+  result: |
+    SUCCESS. 6-channel spectral data streams at ~8Hz continuous.
+    Channels (raw ADC counts at gain=33):
+      Red=717K, Green=792K, Blue=148K, IR=7.16M, CLR1=887K, CLR2=6.61M
+    Data saved to data/spectral_capture_001.csv (20 samples).
+  verdict: BREAKTHROUGH
+
+- id: E006
+  date: 2026-05-19
+  session: 3
+  name: Continuous vs on-change reporting mode
+  script: tools/spectral_usf/spectral_reader.cpp (reporting_mode=1 vs 2)
+  purpose: Compare sample rates between on-change (mode 2) and continuous (mode 1) reporting
+  result: On-change yields ~1 sample/20s in stable lighting. Continuous yields ~8Hz (127ms period). 8Hz matches the AOC's configured 100ms period with some overhead.
+  verdict: SUCCESS - use continuous mode for data capture
