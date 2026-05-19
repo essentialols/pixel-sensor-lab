@@ -75,3 +75,21 @@
     All channels show sub-0.35% coefficient of variation under stable lighting.
     Saved to data/spectral_capture_002_100samples.csv.
   verdict: SUCCESS - 7.8Hz max, noise floor characterized
+
+- id: E008
+  date: 2026-05-19
+  session: 3
+  name: 500-sample noise characterization (Allan deviation)
+  script: tools/spectral_usf/spectral_reader.cpp + tools/analyze_spectral.py
+  purpose: 60-second continuous capture for Allan deviation noise analysis
+  result: |
+    500 samples over 63.6 seconds at 7.8Hz. Allan deviation shows classic
+    white-noise-to-drift transition:
+      - White noise regime: tau < 2s (ADEV decreases as 1/sqrt(tau))
+      - Minimum ADEV at tau ~2-4s: Red=276, Green=404, Blue=98, IR=5503
+      - Drift regime: tau > 4s (slow environmental changes dominate)
+    Blue channel has lowest noise floor (ADEV=98 at 4s, 0.06% of mean).
+    IR and CLR2 track together (correlated noise, likely thermal).
+    Spectral ratios stable to <0.3% over 60s.
+    Saved to data/spectral_capture_003_500samples_60s.csv.
+  verdict: SUCCESS - noise fully characterized, excellent for spectroscopy
