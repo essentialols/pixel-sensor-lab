@@ -298,9 +298,11 @@ int main(int argc, char* argv[]) {
             "_ZN3usf10UsfApiImpl13StartSamplingENS_13UsfSensorTypeEPKcllNS_22UsfSensorReportingModeERmjjb");
         if (start_sampling) {
             unsigned long sample_handle = 0;
-            ALOG("StartSampling: type=12 (spectral), period=100ms, CONTINUOUS mode");
+            long long period_ns = 16000000LL; // 16ms = 62.5Hz (VD6282 max spec)
+            ALOG("StartSampling: type=12, period=%lldns (%.1fHz), CONTINUOUS",
+                 period_ns, 1e9 / period_ns);
             int ret = start_sampling(internal_api, 12, "VD6282 Spectral Sensor",
-                                     100000000LL, 0LL, 1, &sample_handle, 0, 0, false);
+                                     period_ns, 0LL, 1, &sample_handle, 0, 0, false);
             ALOG("StartSampling returned %d, handle=0x%lx (%lu)", ret, sample_handle, sample_handle);
 
             if (ret == 0) {

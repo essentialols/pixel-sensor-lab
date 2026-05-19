@@ -55,3 +55,23 @@
   purpose: Compare sample rates between on-change (mode 2) and continuous (mode 1) reporting
   result: On-change yields ~1 sample/20s in stable lighting. Continuous yields ~8Hz (127ms period). 8Hz matches the AOC's configured 100ms period with some overhead.
   verdict: SUCCESS - use continuous mode for data capture
+
+- id: E007
+  date: 2026-05-19
+  session: 3
+  name: Max sample rate test (62.5Hz requested)
+  script: tools/spectral_usf/spectral_reader.cpp (period_ns=16000000)
+  purpose: Push sample rate to VD6282 spec maximum of 62.5Hz
+  result: |
+    AOC caps at 7.8Hz (127.4ms interval) regardless of requested period.
+    The AOC's internal period is 100ms (10Hz) but delivery latency adds ~27ms.
+    100 samples captured in 12.6 seconds. Data quality excellent:
+      Red: mean=742813, CV=0.20%
+      Green: mean=826550, CV=0.16%
+      Blue: mean=154040, CV=0.25%
+      IR: mean=7426806, CV=0.34%
+      CLR1: mean=913562, CV=0.28%
+      CLR2: mean=6855325, CV=0.34%
+    All channels show sub-0.35% coefficient of variation under stable lighting.
+    Saved to data/spectral_capture_002_100samples.csv.
+  verdict: SUCCESS - 7.8Hz max, noise floor characterized
