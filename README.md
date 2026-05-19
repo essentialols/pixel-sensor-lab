@@ -20,9 +20,10 @@ Each sensor gets its own project repo with kernel-level tools, raw data extracti
 
 ### Completed projects
 
-| Sensor                | Chip           | Kernel module  | Project                                           | Status                                                                           |
-| --------------------- | -------------- | -------------- | ------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Laser ToF rangefinder | STMicro VL53L1 | `stmvl53l1.ko` | [pixel-tof-rangefinder](../pixel-tof-rangefinder) | **Done** -- 2.3um precision, 345Hz, 24-bin photon histograms, 87% CRLB-efficient |
+| Sensor                | Chip           | Kernel module                  | Project                                           | Status                                                                                      |
+| --------------------- | -------------- | ------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Laser ToF rangefinder | STMicro VL53L1 | `stmvl53l1.ko`                 | [pixel-tof-rangefinder](../pixel-tof-rangefinder) | **Done** -- 2.3um precision, 345Hz, 24-bin photon histograms, 87% CRLB-efficient            |
+| Rear spectral sensor  | STMicro VD6282 | AOC sensor hub (`aoc_core.ko`) | _(this repo)_                                     | **Done** -- 6-ch raw spectral (R/G/B/IR/CLR1/CLR2) at 7.8Hz, CV 0.16-0.34%, RALS-calibrated |
 
 ### Active projects
 
