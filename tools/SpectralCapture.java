@@ -137,10 +137,17 @@ public class SpectralCapture {
         // List sensors and find target handle
         int handle = findSensorHandle(ssBinder, targetType);
         if (listOnly) { System.exit(0); return; }
-        
+
         if (handle < 0) {
-            System.err.println("Sensor type " + targetType + " not found!");
-            System.exit(1);
+            // Fallback: known handles from dumpsys sensorservice
+            if (targetType == 65545) handle = 0x0101001c; // VD6282 Rear Light
+            else if (targetType == 5) handle = 0x01010005; // TMD3719 ALS
+            else if (targetType == 131088) handle = 0x01010026; // Auto Brightness
+            else {
+                System.err.println("Sensor type " + targetType + " not found!");
+                System.exit(1);
+            }
+            System.err.println("Using hardcoded handle 0x" + Integer.toHexString(handle));
         }
         
         // Create sensor event connection (transaction code 2)
@@ -161,23 +168,30 @@ public class SpectralCapture {
         boolean ok = (Boolean) transact.invoke(ssBinder, 2, data, reply, 0);
         System.err.println("createSensorEventConnection: ok=" + ok + " replySize=" + getSize.invoke(reply));
         
-        // Read the ISensorEventConnection binder
+        // Read the ISensorEventConnection binder from reply
+        // The reply Parcel contains: ISensorEventConnection binder + BitTube channel
+        // No exception code prefix for non-AIDL binder transactions
         setPos.invoke(reply, 0);
-        int exCode = (Integer) readInt.invoke(reply);
-        System.err.println("Exception code: " + exCode);
-        
-        if (exCode != 0) {
-            System.err.println("createSensorEventConnection failed: exception " + exCode);
-            recycle.invoke(data);
-            recycle.invoke(reply);
-            System.exit(1);
+
+        // Try reading binder directly (non-AIDL format)
+        Object connBinder = null;
+        try {
+            connBinder = readStrongBinder.invoke(reply);
+        } catch (Exception e) {
+            System.err.println("readStrongBinder failed: " + e);
         }
-        
-        // The reply contains an ISensorEventConnection binder + a BitTube fd
-        Object connBinder = readStrongBinder.invoke(reply);
         System.err.println("Connection binder: " + connBinder);
-        
+
         if (connBinder == null) {
+            // Dump raw reply bytes for debugging
+            int sz = (Integer) getSize.invoke(reply);
+            setPos.invoke(reply, 0);
+            System.err.println("Reply size=" + sz + " bytes, dumping ints:");
+            for (int off = 0; off + 4 <= sz && off < 64; off += 4) {
+                setPos.invoke(reply, off);
+                int v = (Integer) readInt.invoke(reply);
+                System.err.println("  [" + off + "] = 0x" + Integer.toHexString(v) + " (" + v + ")");
+            }
             System.err.println("Got null connection binder");
             recycle.invoke(data);
             recycle.invoke(reply);
