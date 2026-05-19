@@ -76,36 +76,50 @@ public:
 // vtable layout: SensorEvent, Connect, Disconnect (no virtual dtor)
 class SpectralCallback : public usf::UsfSpectralApiCallbackInterface {
 public:
-    void OnSensorEventCallback(usf::UsfSensorType type, unsigned long timestamp,
-                                const usf::UsfVector<float, 1>& data,
+    // The real callback params from disassembly:
+    // w1 = mapped_type (0=spectral, 1=flicker, 3=other)
+    // w2 = session_index
+    // x3 = UsfVector<float>* (data)
+    // x4 = accuracy
+    // But our C++ signature maps them as (type, timestamp, data_ref, accuracy).
+    // So: type=mapped_type, timestamp=session_index, data=x3, accuracy=x4
+    void OnSensorEventCallback(usf::UsfSensorType type, unsigned long session_idx,
+                                const usf::UsfVector<float, 1>& data_ref,
                                 unsigned long accuracy) override {
-        ALOG("OnSensorEventCallback type=%d size=%zu", (int)type, data.size);
-        fprintf(stderr, "CALLBACK: OnSensorEventCallback type=%d size=%zu\n",
-                (int)type, data.size);
+        // Dump raw bytes of the data_ref to understand the real UsfVector layout
+        const unsigned char* raw = (const unsigned char*)&data_ref;
+        ALOG("SensorEvent type=%d sess=%lu acc=%lu", (int)type, session_idx, accuracy);
+        ALOG("data_ref raw[0..63]: %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x "
+             "%02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x "
+             "%02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x "
+             "%02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x",
+             raw[0],raw[1],raw[2],raw[3], raw[4],raw[5],raw[6],raw[7],
+             raw[8],raw[9],raw[10],raw[11], raw[12],raw[13],raw[14],raw[15],
+             raw[16],raw[17],raw[18],raw[19], raw[20],raw[21],raw[22],raw[23],
+             raw[24],raw[25],raw[26],raw[27], raw[28],raw[29],raw[30],raw[31],
+             raw[32],raw[33],raw[34],raw[35], raw[36],raw[37],raw[38],raw[39],
+             raw[40],raw[41],raw[42],raw[43], raw[44],raw[45],raw[46],raw[47],
+             raw[48],raw[49],raw[50],raw[51], raw[52],raw[53],raw[54],raw[55],
+             raw[56],raw[57],raw[58],raw[59], raw[60],raw[61],raw[62],raw[63]);
+
+        // Also try interpreting as array of floats starting at different offsets
+        const float* f0 = (const float*)raw;
+        ALOG("as float[0..7]: %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.1f",
+             f0[0], f0[1], f0[2], f0[3], f0[4], f0[5], f0[6], f0[7]);
+        const float* f4 = (const float*)(raw + 16);
+        ALOG("as float[4..11]: %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.1f",
+             f4[0], f4[1], f4[2], f4[3], f4[4], f4[5], f4[6], f4[7]);
 
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);
         double wall_time = ts.tv_sec + ts.tv_nsec / 1e9;
 
-        if (sample_count == 0) {
-            const char* hdr = "wall_time,aoc_timestamp,ch0,ch1,ch2,ch3,ch4,ch5,accuracy";
-            printf("%s\n", hdr);
-            if (csv_out) fprintf(csv_out, "%s\n", hdr);
+        printf("%.6f,%d,%lu", wall_time, (int)type, session_idx);
+        for (int i = 0; i < 16; i++) {
+            printf(",%.6f", f0[i]);
         }
-
-        printf("%.6f,%lu", wall_time, timestamp);
-        if (csv_out) fprintf(csv_out, "%.6f,%lu", wall_time, timestamp);
-
-        for (size_t i = 0; i < data.size && i < 16; i++) {
-            printf(",%.6f", data.data[i]);
-            if (csv_out) fprintf(csv_out, ",%.6f", data.data[i]);
-        }
-
         printf(",%lu\n", accuracy);
-        if (csv_out) fprintf(csv_out, ",%lu\n", accuracy);
-
         fflush(stdout);
-        if (csv_out) fflush(csv_out);
 
         sample_count++;
         if (max_samples > 0 && sample_count >= max_samples) {
@@ -254,9 +268,6 @@ int main(int argc, char* argv[]) {
     ALOG("Internal UsfApi ptr at offset 0x18: %p", internal_api);
 
     if (internal_api) {
-        // StartSampling is a virtual method on UsfApiImpl
-        // UsfSensorType 12 = spectral sensor
-        // UsfSensorReportingMode 2 = ON_CHANGE
         typedef int (*StartSamplingFn)(void* this_ptr, int sensor_type, const char* name,
                                         long long period_ns, long long max_latency_ns,
                                         int reporting_mode, unsigned long* handle,
@@ -265,17 +276,33 @@ int main(int argc, char* argv[]) {
             "_ZN3usf10UsfApiImpl13StartSamplingENS_13UsfSensorTypeEPKcllNS_22UsfSensorReportingModeERmjjb");
         if (start_sampling) {
             unsigned long sample_handle = 0;
-            ALOG("Calling StartSampling: type=12 (spectral), period=100ms, on-change mode");
+            ALOG("StartSampling: type=12 (spectral), period=100ms, on-change");
             int ret = start_sampling(internal_api, 12, "VD6282 Spectral Sensor",
                                      100000000LL, 0LL, 2, &sample_handle, 0, 0, false);
-            ALOG("StartSampling returned %d, handle=%lu", ret, sample_handle);
-        } else {
-            ALOG("StartSampling not found: %s", dlerror());
+            ALOG("StartSampling returned %d, handle=0x%lx (%lu)", ret, sample_handle, sample_handle);
+
+            if (ret == 0) {
+                // SensorEventCallback matches cookies at offsets:
+                // 0x58, 0xe8, 0x178, 0x208, 0x298, 0x328, 0x3b8, 0x448
+                // (8 session slots, 0x90 apart, cookie at +0x30 from session base)
+                //
+                // Write the cookie to session slot 0 (offset 0x58)
+                // Also set the session's active flag at offset 0x28 (session base)
+                volatile uintptr_t* session0_active = (uintptr_t*)((char*)api + 0x28);
+                volatile uintptr_t* session0_cookie = (uintptr_t*)((char*)api + 0x58);
+                ALOG("Writing cookie 0x%lx to session slot 0 (offset 0x58)", sample_handle);
+                ALOG("Session0 before: active=%lu cookie=0x%lx",
+                     (unsigned long)*session0_active, *session0_cookie);
+                *session0_cookie = sample_handle;
+                *session0_active = 1;
+                ALOG("Session0 after: active=%lu cookie=0x%lx",
+                     (unsigned long)*session0_active, *session0_cookie);
+            }
         }
     }
 
     ALOG("Setup complete, waiting for events...");
-    sleep(3);
+    sleep(1);
 
     fprintf(stderr, "Spectral API created. Capturing for %d seconds (Ctrl+C to stop)...\n",
             duration_sec);
