@@ -26,9 +26,9 @@ Each sensor gets its own project repo with kernel-level tools, raw data extracti
 
 ### Active projects
 
-| Sensor                | Chip         | Kernel module                  | Project                                           | Status                          |
-| --------------------- | ------------ | ------------------------------ | ------------------------------------------------- | ------------------------------- |
-| UWB radio rangefinder | Qorvo DW3000 | `dw3000.ko` + `mcps802154*.ko` | [pixel-uwb-rangefinder](../pixel-uwb-rangefinder) | **Session 0** -- reconnaissance |
+| Sensor                | Chip         | Kernel module                  | Project                                           | Status                                                                                    |
+| --------------------- | ------------ | ------------------------------ | ------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| UWB radio rangefinder | Qorvo DW3000 | `dw3000.ko` + `mcps802154*.ko` | [pixel-uwb-rangefinder](../pixel-uwb-rangefinder) | **Session 1** -- DW3000 on spi16.0, all modules built from source, custom kernel building |
 
 ### Candidate sensors (not yet started)
 
