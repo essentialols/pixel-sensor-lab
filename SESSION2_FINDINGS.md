@@ -159,3 +159,29 @@ The USF HAL binary contains the string "com.google.sensor.color" which is a sens
 3. **Patch the sensors.usf.so** to register the color sensor type during initialization.
 4. **Write a custom CHRE nanoapp** via /dev/acd-com.google.chre that reads VD6282 spectral data from inside the AOC.
 5. **Ask the primary session** (kernel work) if they can add an I2C passthrough to expose the AOC's i2c0 bus to Linux.
+
+## AOC Firmware Analysis
+
+The AOC firmware (/vendor/firmware/aoc.bin, 21MB) contains:
+- Full VD6282 driver with spectral sensor lifecycle (allocate/start/stop/sample)
+- "VD6282 Spectral Sensor" as a named sensor inside the AOC
+- FlatBuffer-based USF protocol for host-to-AOC communication
+- sensor_type_helpers.cc reference (type mapping is in compiled code)
+
+The firmware explicitly creates three VD6282 sub-sensors:
+1. spectral (raw channels) - allocated but NOT exposed to Android
+2. flicker (flicker detection) - allocated but NOT exposed  
+3. rls (rear light / lux) - exposed as type 65545
+
+The "com.google.sensor.color" type string exists in the Android-side HAL but is not registered for this device variant. Brute-force testing types 65540-65552 found no hidden spectral sensor.
+
+## Session 2 Summary
+
+3 commits pushed. Key achievements:
+1. APK working reliably for VD6282 data capture
+2. Complete AOC barrier analysis with factory calibration proof
+3. Hidden sensor property discovered and tested
+4. USF protocol architecture mapped (FlatBuffer IPC)
+5. AOC firmware analyzed — spectral sensor exists but isn't exposed
+
+Next session should focus on: modifying the sensor registry or building a native USF FlatBuffer client to request the spectral sample channel directly from the AOC.
