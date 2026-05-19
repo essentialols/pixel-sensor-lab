@@ -113,3 +113,31 @@
     Difference from RALS ratios indicates indoor artificial lighting vs
     factory reference (likely D65 or similar standard illuminant).
   verdict: SUCCESS - calibration data available for physical unit conversion
+
+- id: E010
+  date: 2026-05-19
+  session: 3
+  name: Screen toggle spectral response test
+  script: tools/spectral_usf/spectral_reader.cpp + adb input keyevent KEYCODE_POWER
+  purpose: Validate sensor reads real ambient light by toggling phone screen on/off during capture
+  result: |
+    100 samples over 12.7s. Screen toggled on/off twice during capture.
+    No detectable transients (all channels vary <0.3%).
+    Validates that VD6282 measures real rear-facing ambient light,
+    unaffected by the phone's own display.
+    Saved to data/spectral_screen_toggle_E010.csv.
+  verdict: SUCCESS - sensor independently measures rear ambient light
+
+- id: E011
+  date: 2026-05-19
+  session: 3
+  name: RALS calibration pipeline
+  script: tools/calibrate_spectral.py
+  purpose: Convert raw ADC counts to RALS-normalized spectral power
+  result: |
+    Calibrated 500-sample dataset. Indoor artificial lighting profile:
+      R=794.7  G=750.1  B=523.1  IR=2943.5  CLR1=189.7  CLR2=1419.6
+    R/G ratio 1.06 (warm light), high IR (incandescent/warm LED).
+    Estimated illuminance: 232 lux.
+    One-shot pipeline: tools/capture_and_analyze.sh
+  verdict: SUCCESS - calibration pipeline operational
