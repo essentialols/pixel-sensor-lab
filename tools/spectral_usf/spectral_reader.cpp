@@ -172,10 +172,13 @@ typedef void (*UsfSpectralApiDestroyFn)(usf::UsfSpectralApi**);
 int main(int argc, char* argv[]) {
     int duration_sec = 10;
     const char* csv_path = NULL;
+    int sensor_type = 12; // default: VD6282 spectral
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-n") == 0 && i + 1 < argc) {
             max_samples = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
+            sensor_type = atoi(argv[++i]);
         } else if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) {
             duration_sec = atoi(argv[++i]);
         } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
@@ -298,10 +301,10 @@ int main(int argc, char* argv[]) {
             "_ZN3usf10UsfApiImpl13StartSamplingENS_13UsfSensorTypeEPKcllNS_22UsfSensorReportingModeERmjjb");
         if (start_sampling) {
             unsigned long sample_handle = 0;
-            long long period_ns = 16000000LL; // 16ms = 62.5Hz (VD6282 max spec)
-            ALOG("StartSampling: type=12, period=%lldns (%.1fHz), CONTINUOUS",
-                 period_ns, 1e9 / period_ns);
-            int ret = start_sampling(internal_api, 12, "VD6282 Spectral Sensor",
+            long long period_ns = 16000000LL;
+            ALOG("StartSampling: type=%d, period=%lldns (%.1fHz), CONTINUOUS",
+                 sensor_type, period_ns, 1e9 / period_ns);
+            int ret = start_sampling(internal_api, sensor_type, "USF Sensor",
                                      period_ns, 0LL, 1, &sample_handle, 0, 0, false);
             ALOG("StartSampling returned %d, handle=0x%lx (%lu)", ret, sample_handle, sample_handle);
 

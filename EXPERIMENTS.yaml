@@ -141,3 +141,20 @@
     Estimated illuminance: 232 lux.
     One-shot pipeline: tools/capture_and_analyze.sh
   verdict: SUCCESS - calibration pipeline operational
+
+- id: E012
+  date: 2026-05-19
+  session: 3
+  name: Multi-sensor type subscription test
+  script: tools/spectral_usf/spectral_reader.cpp -s <type>
+  purpose: Test if other AOC sensors can be subscribed via the UsfSpectralApi
+  result: |
+    Only VD6282 spectral (type 12) returns success (code 0) from StartSampling.
+    All other types return error code 7:
+      Type  9 (TMD3719 ALS):           error 7
+      Type 13 (VD6282 Flicker):        error 7
+      Type 46 (VD6282 Rear Light):     not tested (already exposed as Android sensor)
+      Type 54 (TMD3719 ALS Raw):       error 7
+    The UsfApiImpl within UsfSpectralApi context only supports the spectral sensor.
+    To access other sensors, a different USF client (not SpectralApi) would be needed.
+  verdict: EXPECTED - UsfSpectralApi is VD6282-spectral-specific
