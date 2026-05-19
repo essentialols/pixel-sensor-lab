@@ -93,3 +93,23 @@
     Spectral ratios stable to <0.3% over 60s.
     Saved to data/spectral_capture_003_500samples_60s.csv.
   verdict: SUCCESS - noise fully characterized, excellent for spectroscopy
+
+- id: E009
+  date: 2026-05-19
+  session: 3
+  name: Factory calibration extraction
+  script: "adb shell su -c cat /mnt/vendor/persist/sensors/registry/vd6282_spectral_fac_cal.reg"
+  purpose: Extract factory calibration data for converting raw counts to physical units
+  result: |
+    Dark current: all channels = 0.0 (no correction needed)
+    Reference ALS readings (RALS, factory light source):
+      R=950.9  G=1118.0  B=298.9  CLR1=4909.1  CLR2=4932.7  IR=2577.4  FLK=123.0
+    RLS g_to_lux factor: 109.58 (Green channel to lux conversion)
+
+    Relative channel sensitivity (normalized to Green):
+      R/G=0.850  B/G=0.267  IR/G=2.306  CLR1/G=4.392  CLR2/G=4.413
+
+    Our captured data ratios: R/G=0.901, B/G=0.186, IR/G=9.043
+    Difference from RALS ratios indicates indoor artificial lighting vs
+    factory reference (likely D65 or similar standard illuminant).
+  verdict: SUCCESS - calibration data available for physical unit conversion
