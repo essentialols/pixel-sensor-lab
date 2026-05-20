@@ -3,6 +3,7 @@ package com.spectral.ripeness;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Bitmap;
@@ -21,6 +22,7 @@ import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.media.Image;
 import android.media.ImageReader;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -80,10 +82,11 @@ public class RipenessActivity extends Activity
 
     // Recording
     private boolean recording = false;
+    private boolean bgRecording = false;
     private FileOutputStream recordStream;
     private String recordLabel = "";
     private int recordCount = 0;
-    private Button recordBtn;
+    private Button recordBtn, bgBtn;
     private TextView tvRecordInfo;
     private long recordStartTime = 0;
 
@@ -192,6 +195,12 @@ public class RipenessActivity extends Activity
         snapBtn.setBackgroundColor(0xFF21262D);
         snapBtn.setOnClickListener(v -> captureFrame());
         recRow.addView(snapBtn, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        bgBtn = new Button(this);
+        bgBtn.setText("BG");
+        bgBtn.setTextColor(0xFFFFFFFF);
+        bgBtn.setBackgroundColor(0xFF21262D);
+        bgBtn.setOnClickListener(v -> toggleBgRecording());
+        recRow.addView(bgBtn, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         tvRecordInfo = makeLabel(" ", 12, "#F85149");
         recRow.addView(tvRecordInfo, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 2));
         root.addView(recRow);
@@ -413,6 +422,45 @@ public class RipenessActivity extends Activity
                     } catch (Exception e) {
                         tvStatus.setText("Error: " + e.getMessage());
                     }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+        }
+    }
+
+    private void toggleBgRecording() {
+        if (bgRecording) {
+            Intent stop = new Intent(this, RecordingService.class);
+            stop.setAction(RecordingService.ACTION_STOP);
+            startService(stop);
+            bgRecording = false;
+            bgBtn.setText("BG");
+            bgBtn.setBackgroundColor(0xFF21262D);
+            tvStatus.setText("Background recording stopped");
+        } else {
+            EditText input = new EditText(this);
+            input.setHint("banana_green");
+            new AlertDialog.Builder(this)
+                .setTitle("Background Recording")
+                .setMessage("Label for background session:")
+                .setView(input)
+                .setPositiveButton("Start", (d, w) -> {
+                    String lbl = input.getText().toString().trim();
+                    if (lbl.isEmpty()) lbl = "unlabeled";
+                    String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+                    String path = "/data/local/tmp/bg_" + lbl + "_" + ts + ".jsonl";
+                    Intent svc = new Intent(this, RecordingService.class);
+                    svc.putExtra("label", lbl);
+                    svc.putExtra("path", path);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(svc);
+                    } else {
+                        startService(svc);
+                    }
+                    bgRecording = true;
+                    bgBtn.setText("BG STOP");
+                    bgBtn.setBackgroundColor(0xFFF85149);
+                    tvStatus.setText("BG recording: " + path);
                 })
                 .setNegativeButton("Cancel", null)
                 .show();

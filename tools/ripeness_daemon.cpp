@@ -279,12 +279,12 @@ static int init_tof() {
 // Output: JSON lines with spectral + ToF + ripeness indices
 // ============================================================
 
-static void emit_json(FILE* out) {
+static int build_json(char* buf, size_t bufsz) {
     float r, g, b, ir, c1, c2, gain;
     unsigned long acc;
 
     pthread_mutex_lock(&output_mutex);
-    if (!spectral_ready) { pthread_mutex_unlock(&output_mutex); return; }
+    if (!spectral_ready) { pthread_mutex_unlock(&output_mutex); return 0; }
     r = spectral_channels[2]; g = spectral_channels[3];
     b = spectral_channels[4]; ir = spectral_channels[5];
     c1 = spectral_channels[6]; c2 = spectral_channels[7];
@@ -305,7 +305,6 @@ static void emit_json(FILE* out) {
     float clr = c2 > 0 ? c1 / c2 : 0;
     float cidx = g > 0 ? (r - b) / g : 0;
 
-    // ToF data
     uint32_t tof_bins[NUM_BINS] = {};
     int tof_distance = -1;
     uint32_t tof_photons = 0;
@@ -315,49 +314,46 @@ static void emit_json(FILE* out) {
         }
     }
 
-    // Lux estimate from green channel (factory calibration: g_to_lux = 109.58)
     float lux_est = gain > 0 ? (g / gain) / 109.58f : 0;
-
-    // Spectral fractions (normalized to visible total)
     float r_frac = vis > 0 ? r / vis : 0;
     float g_frac = vis > 0 ? g / vis : 0;
     float b_frac = vis > 0 ? b / vis : 0;
 
     seq++;
 
-    fprintf(out, "{\"seq\":%lu,\"t\":%.3f,\"aoc_ts\":%lu,\"gain\":%.0f,\"lux\":%.1f,"
-            "\"raw\":{\"R\":%.0f,\"G\":%.0f,\"B\":%.0f,\"IR\":%.0f,\"CLR1\":%.0f,\"CLR2\":%.0f},"
-            "\"frac\":{\"R\":%.4f,\"G\":%.4f,\"B\":%.4f},"
-            "\"idx\":{\"NDVI\":%.4f,\"RG\":%.4f,\"BG\":%.4f,\"NIR_VIS\":%.4f,\"CLR\":%.4f,\"CI\":%.4f}",
-            seq, wall, acc, gain, lux_est,
-            r, g, b, ir, c1, c2,
-            r_frac, g_frac, b_frac,
-            ndvi, rg, bg, nir_vis, clr, cidx);
+    int off = snprintf(buf, bufsz,
+        "{\"seq\":%lu,\"t\":%.3f,\"aoc_ts\":%lu,\"gain\":%.0f,\"lux\":%.1f,"
+        "\"raw\":{\"R\":%.0f,\"G\":%.0f,\"B\":%.0f,\"IR\":%.0f,\"CLR1\":%.0f,\"CLR2\":%.0f},"
+        "\"frac\":{\"R\":%.4f,\"G\":%.4f,\"B\":%.4f},"
+        "\"idx\":{\"NDVI\":%.4f,\"RG\":%.4f,\"BG\":%.4f,\"NIR_VIS\":%.4f,\"CLR\":%.4f,\"CI\":%.4f}",
+        seq, wall, acc, gain, lux_est,
+        r, g, b, ir, c1, c2,
+        r_frac, g_frac, b_frac,
+        ndvi, rg, bg, nir_vis, clr, cidx);
 
     if (tof_available && tof_photons > 0 && tof_photons < 100000000u) {
-        // Compute ToF histogram stats
         uint32_t peak_val = 0;
         int peak_bin = 0;
         double centroid = 0;
-        uint32_t total_valid = tof_photons;
         for (int i = 0; i < NUM_BINS; i++) {
             if (tof_bins[i] > peak_val) { peak_val = tof_bins[i]; peak_bin = i; }
             centroid += (double)i * tof_bins[i];
         }
-        if (total_valid > 0) centroid /= total_valid;
+        if (tof_photons > 0) centroid /= tof_photons;
 
-        fprintf(out, ",\"tof\":{\"photons\":%u,\"dist_mm\":%d,"
-                "\"peak_bin\":%d,\"centroid\":%.2f,\"bins\":[",
-                tof_photons, tof_distance, peak_bin, centroid);
+        off += snprintf(buf + off, bufsz - off,
+            ",\"tof\":{\"photons\":%u,\"dist_mm\":%d,"
+            "\"peak_bin\":%d,\"centroid\":%.2f,\"bins\":[",
+            tof_photons, tof_distance, peak_bin, centroid);
         for (int i = 0; i < NUM_BINS; i++) {
-            if (i > 0) fprintf(out, ",");
-            fprintf(out, "%u", tof_bins[i]);
+            if (i > 0) off += snprintf(buf + off, bufsz - off, ",");
+            off += snprintf(buf + off, bufsz - off, "%u", tof_bins[i]);
         }
-        fprintf(out, "]}");
+        off += snprintf(buf + off, bufsz - off, "]}");
     }
 
-    fprintf(out, "}\n");
-    fflush(out);
+    off += snprintf(buf + off, bufsz - off, "}\n");
+    return off;
 }
 
 // ============================================================
@@ -387,14 +383,20 @@ int main(int argc, char* argv[]) {
     int duration_sec = 0;
     const char* out_path = NULL;
     int port = 0;
+    int headless = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-n") == 0 && i + 1 < argc) max_samples = atoi(argv[++i]);
         else if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) duration_sec = atoi(argv[++i]);
         else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) out_path = argv[++i];
         else if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) port = atoi(argv[++i]);
+        else if (strcmp(argv[i], "-d") == 0) headless = 1;
         else if (strcmp(argv[i], "-h") == 0) {
-            fprintf(stderr, "Usage: %s [-n samples] [-t seconds] [-o file.jsonl] [-p port]\n", argv[0]);
+            fprintf(stderr, "Usage: %s [-n samples] [-t seconds] [-o file.jsonl] [-p port] [-d]\n"
+                    "  -o  Write JSONL to file (always, even with -p)\n"
+                    "  -p  Also serve on TCP port (for app UI)\n"
+                    "  -d  Headless mode: start immediately, don't wait for TCP client\n",
+                    argv[0]);
             return 0;
         }
     }
@@ -402,11 +404,11 @@ int main(int argc, char* argv[]) {
     signal(SIGINT, sigint_handler);
     signal(SIGTERM, sigint_handler);
 
-    FILE* output = stdout;
+    FILE* file_output = NULL;
     if (out_path) {
-        output = fopen(out_path, "w");
-        if (!output) { perror("fopen"); return 1; }
-        out_file = output;
+        file_output = fopen(out_path, "w");
+        if (!file_output) { perror("fopen"); return 1; }
+        out_file = file_output;
     }
 
     if (port > 0) {
@@ -426,20 +428,64 @@ int main(int argc, char* argv[]) {
     ALOG("Sensors ready: spectral=%s tof=%s",
          spectral_ok == 0 ? "YES" : "NO", tof_ok == 0 ? "YES" : "NO");
 
-    // If TCP server, wait for client
+    FILE* tcp_output = NULL;
     if (port > 0 && server_fd >= 0) {
-        ALOG("Waiting for client connection on port %d...", port);
-        client_fd = accept(server_fd, NULL, NULL);
-        if (client_fd >= 0) {
-            output = fdopen(client_fd, "w");
-            ALOG("Client connected");
+        if (!headless && !file_output) {
+            ALOG("Waiting for client connection on port %d...", port);
+            client_fd = accept(server_fd, NULL, NULL);
+        } else {
+            int flags = fcntl(server_fd, F_GETFL, 0);
+            fcntl(server_fd, F_SETFL, flags | O_NONBLOCK);
+            client_fd = accept(server_fd, NULL, NULL);
         }
+        if (client_fd >= 0) {
+            tcp_output = fdopen(client_fd, "w");
+            ALOG("Client connected");
+        } else if (headless || file_output) {
+            ALOG("No client yet, recording to file (client can connect later)");
+        }
+    }
+
+    if (port > 0 && server_fd >= 0) {
+        int flags = fcntl(server_fd, F_GETFL, 0);
+        fcntl(server_fd, F_SETFL, flags | O_NONBLOCK);
     }
 
     time_t start = time(NULL);
     while (running) {
-        emit_json(output);
-        usleep(50000); // 50ms poll (20Hz max output rate)
+        char json_buf[8192];
+        int json_len = build_json(json_buf, sizeof(json_buf));
+
+        if (json_len > 0) {
+            if (file_output) {
+                fwrite(json_buf, 1, json_len, file_output);
+                if (sample_count % 50 == 0) fflush(file_output);
+            }
+            if (tcp_output) {
+                if (fwrite(json_buf, 1, json_len, tcp_output) < (size_t)json_len
+                    || fflush(tcp_output) != 0) {
+                    fclose(tcp_output);
+                    tcp_output = NULL;
+                    client_fd = -1;
+                    ALOG("Client disconnected");
+                }
+            }
+            if (!file_output && !tcp_output) {
+                fwrite(json_buf, 1, json_len, stdout);
+                fflush(stdout);
+            }
+        }
+
+        if (!tcp_output && port > 0 && server_fd >= 0) {
+            int new_fd = accept(server_fd, NULL, NULL);
+            if (new_fd >= 0) {
+                client_fd = new_fd;
+                tcp_output = fdopen(client_fd, "w");
+                ALOG("Client connected (late)");
+            }
+        }
+
+        usleep(50000);
 
         sample_count++;
         if (max_samples > 0 && sample_count >= max_samples) break;

@@ -6,7 +6,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 NDK="$HOME/Library/Android/sdk/ndk/27.0.12077973"
 CC="$NDK/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android33-clang++"
 SYSROOT="$NDK/toolchains/llvm/prebuilt/darwin-x86_64/sysroot"
-BUILD_TOOLS="$HOME/Library/Android/sdk/build-tools/$(ls "$HOME/Library/Android/sdk/build-tools/" | sort -V | tail -1)"
+BUILD_TOOLS="$HOME/Library/Android/sdk/build-tools/35.0.0"
 PLATFORM="$HOME/Library/Android/sdk/platforms/$(ls "$HOME/Library/Android/sdk/platforms/" | sort -V | tail -1)"
 
 echo "=== Building Fruit Ripeness App ==="
@@ -32,7 +32,8 @@ mkdir -p "$REPO/app/obj" "$REPO/app/dex"
 javac -source 1.8 -target 1.8 \
     -classpath "$PLATFORM/android.jar" \
     -d "$REPO/app/obj" \
-    "$REPO/app/src/RipenessActivity.java"
+    "$REPO/app/src/RipenessActivity.java" \
+    "$REPO/app/src/RecordingService.java"
 
 echo "[3/4] Creating APK..."
 "$BUILD_TOOLS/d8" --output "$REPO/app/dex" \
