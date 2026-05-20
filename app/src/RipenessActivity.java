@@ -11,6 +11,7 @@ import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
+import android.widget.ScrollView;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -63,9 +64,9 @@ public class RipenessActivity extends Activity
     private Handler handler = new Handler(Looper.getMainLooper());
     private volatile boolean connected = false;
     private SensorManager sensorManager;
-    private Sensor lightSensor, proxSensor, accelSensor;
+    private Sensor lightSensor, proxSensor, accelSensor, pressureSensor;
     private float ambientLux = -1, proximity = -1;
-    private float accelMag = 0;
+    private float accelMag = 0, pressure = -1, temperature = -1;
     private boolean isStable = false;
 
     // Recording mode
@@ -94,6 +95,10 @@ public class RipenessActivity extends Activity
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(32, 48, 32, 32);
         root.setBackgroundColor(Color.parseColor("#1a1a2e"));
+
+        // Wrap in ScrollView for long content
+        ScrollView scroll = new ScrollView(this);
+        scroll.setBackgroundColor(Color.parseColor("#1a1a2e"));
 
         // Title
         TextView title = makeLabel("Fruit Ripeness Analyzer", 24, "#e94560");
@@ -183,22 +188,26 @@ public class RipenessActivity extends Activity
         tvAmbientALS = makeLabel("Ambient ALS: ---", 14, "#88ccff");
         root.addView(tvAmbientALS);
 
-        setContentView(root);
+        scroll.addView(root);
+        setContentView(scroll);
 
         // Initialize camera manager
         cameraManager = (CameraManager) getSystemService(CAMERA_SERVICE);
 
-        // Initialize front ALS (TMD3719) via SensorManager
+        // Initialize Android sensors via SensorManager
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         lightSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT);
         proxSensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
         accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
+        pressureSensor = sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE);
         if (lightSensor != null)
             sensorManager.registerListener(this, lightSensor, SensorManager.SENSOR_DELAY_UI);
         if (proxSensor != null)
             sensorManager.registerListener(this, proxSensor, SensorManager.SENSOR_DELAY_UI);
         if (accelSensor != null)
             sensorManager.registerListener(this, accelSensor, SensorManager.SENSOR_DELAY_UI);
+        if (pressureSensor != null)
+            sensorManager.registerListener(this, pressureSensor, SensorManager.SENSOR_DELAY_UI);
 
         startDaemonConnection();
     }
@@ -375,11 +384,14 @@ public class RipenessActivity extends Activity
             float x = event.values[0], y = event.values[1], z = event.values[2];
             accelMag = (float) Math.sqrt(x*x + y*y + z*z);
             isStable = accelMag < 0.3f;
+        } else if (event.sensor.getType() == Sensor.TYPE_PRESSURE) {
+            pressure = event.values[0];
         }
         handler.post(() -> {
-            String stability = isStable ? "STABLE" : String.format("MOVING (%.2f)", accelMag);
-            tvAmbientALS.setText(
-                String.format("ALS: %.0f lux | Prox: %.0f | %s", ambientLux, proximity, stability));
+            String stability = isStable ? "STABLE" : String.format("MOVING (%.1f)", accelMag);
+            String envLine = String.format("ALS:%.0flux Prox:%.0f %s", ambientLux, proximity, stability);
+            if (pressure > 0) envLine += String.format(" %.0fhPa", pressure);
+            tvAmbientALS.setText(envLine);
         });
     }
 
