@@ -3,3 +3,7 @@
 *.DS_Store
 tools/spectral_usf/libs/
 tools/spectral_usf/spectral_reader
+app/obj/
+app/dex/
+app/ripeness-unsigned.apk
+app/ripeness_daemon
