@@ -274,13 +274,60 @@ def feature_importance(data):
     return sorted(scores.items(), key=lambda x: -x[1])
 
 
+def compare_feature_groups(data):
+    """Train with different feature subsets and report which combination works best."""
+    all_keys = sorted(data[0][0].keys())
+    groups = {
+        'indices': [k for k in all_keys if k in ('NDVI','RG','BG','NIR_VIS','CLR','CI')],
+        'fractions': [k for k in all_keys if k.endswith('_frac')],
+        'rals': [k for k in all_keys if k.startswith('rals_')],
+        'reflectance': [k for k in all_keys if k.startswith('refl_')],
+        'tof': [k for k in all_keys if k.startswith('tof_')],
+        'lux': [k for k in all_keys if k == 'lux'],
+    }
+    groups = {k: v for k, v in groups.items() if v}
+
+    combos = []
+    group_names = list(groups.keys())
+    for name in group_names:
+        combos.append((name, groups[name]))
+    for i, n1 in enumerate(group_names):
+        for n2 in group_names[i+1:]:
+            combos.append((f"{n1}+{n2}", groups[n1] + groups[n2]))
+    combos.append(('all', all_keys))
+
+    print(f"\n--- Feature Group Comparison (LOO CV, {len(data)} samples) ---")
+    print(f"{'Group':<25} {'Features':>3}  {'NC LOO':>7}  {'kNN LOO':>7}")
+    print("-" * 50)
+
+    best_acc = 0
+    best_name = ""
+    for name, keys in combos:
+        if not keys:
+            continue
+        subset = [({k: f[k] for k in keys if k in f}, label) for f, label in data]
+        if len(subset) < 4:
+            continue
+        nc_loo = leave_one_out_cv(subset, NearestCentroidClassifier)
+        knn_loo = leave_one_out_cv(subset, KNNClassifier, k=min(3, len(subset) - 2))
+        best_of = max(nc_loo, knn_loo)
+        marker = " *" if best_of > best_acc else ""
+        if best_of > best_acc:
+            best_acc = best_of
+            best_name = name
+        print(f"  {name:<23} {len(keys):>3}  {nc_loo:>6.1%}  {knn_loo:>6.1%}{marker}")
+
+    print(f"\nBest: {best_name} ({best_acc:.1%})")
+
+
 def main():
     if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <data_dir> [--predict <capture.jsonl>]")
+        print(f"Usage: {sys.argv[0]} <data_dir> [--predict <file>] [--compare]")
         sys.exit(1)
 
     data_dir = sys.argv[1]
     predict_file = None
+    do_compare = '--compare' in sys.argv
     if '--predict' in sys.argv:
         idx = sys.argv.index('--predict')
         if idx + 1 < len(sys.argv):
@@ -339,6 +386,9 @@ def main():
                 if features:
                     label, dist = nc.predict(features)
                     print(f"  seq={obj.get('seq', '?')}: {label} (d={dist:.3f})")
+
+    if do_compare and len(data) >= 4:
+        compare_feature_groups(data)
 
 if __name__ == '__main__':
     main()
