@@ -82,6 +82,13 @@
 | 6    | CS40L26 haptic  | Actuator QA           | Polytec vibrometer    | $20-100K    |
 | 7    | TMD3719 ALS     | Ambient reference     | (calibration aid)     | N/A         |
 | 8    | DW3000 UWB      | Indoor positioning    | Pozyx/Sewio RTLS      | $5-50K      |
+| 9    | MMC56X3X x2 mag | Metal/stud detection  | Fluxgate gradiometer  | $5-50K      |
+
+**NEW - MMC56X3X Dual Magnetometer Gradiometer** (see `pixel-mag-gradiometer` repo):
+Bypassed private_mag permission to read both raw magnetometers at 100Hz.
+Kalman-filtered noise: 0.20 uT. Internal magnet creates 3.84x amplification
+on Mag1 Y-axis (0.061 uT effective sensitivity). Detects nails at 5.5cm,
+pipes at 12cm, magnets at 26cm. MagSight app with audio metal detector beeps.
 
 ## Key Insight
 
