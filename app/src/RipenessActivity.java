@@ -3,25 +3,25 @@ package com.spectral.ripeness;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
-import android.widget.EditText;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Bitmap;
 import android.graphics.ImageFormat;
-import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
-import android.hardware.SensorManager;
-import android.widget.ScrollView;
+import android.graphics.Paint;
+import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.media.Image;
 import android.media.ImageReader;
 import android.os.Bundle;
-import android.graphics.SurfaceTexture;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
@@ -30,8 +30,9 @@ import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.util.TypedValue;
 import java.io.BufferedReader;
@@ -47,38 +48,18 @@ import java.util.List;
 import java.util.Locale;
 import org.json.JSONObject;
 
-/**
- * Fruit Ripeness Analyzer
- *
- * Connects to ripeness_daemon on localhost:8765, displays live
- * spectral data + ripeness indices.
- */
 public class RipenessActivity extends Activity
         implements TextureView.SurfaceTextureListener, SensorEventListener {
 
-    private TextView tvStatus, tvNDVI, tvRG, tvNIRVIS, tvRipeness;
-    private TextView tvRed, tvGreen, tvBlue, tvIR, tvCLR1, tvCLR2;
-    private ProgressBar pbRed, pbGreen, pbBlue, pbIR;
-    private TextView tvToF, tvLux, tvAmbientALS;
-    private View colorSwatch;
+    private TextView tvStatus, tvRipeness, tvLux, tvEnv;
+    private TextView tvNDVI, tvRG, tvNIRVIS;
+    private View colorSwatch, readyIndicator;
+    private SpectrumBarView spectrumBars;
     private Handler handler = new Handler(Looper.getMainLooper());
     private volatile boolean connected = false;
-    private SensorManager sensorManager;
-    private Sensor lightSensor, proxSensor, accelSensor, pressureSensor;
-    private float ambientLux = -1, proximity = -1;
-    private float accelMag = 0, pressure = -1, temperature = -1;
-    private boolean isStable = false;
-
-    // Recording mode
-    private boolean recording = false;
-    private FileOutputStream recordStream;
-    private String recordLabel = "";
-    private int recordCount = 0;
-    private Button recordBtn;
-    private TextView tvRecordStatus;
     private Socket socket;
 
-    // Camera2 API fields
+    // Camera2
     private TextureView textureView;
     private CameraManager cameraManager;
     private CameraDevice cameraDevice;
@@ -87,141 +68,183 @@ public class RipenessActivity extends Activity
     private Handler cameraHandler;
     private HandlerThread cameraThread;
 
+    // Android sensors
+    private SensorManager sensorManager;
+    private Sensor lightSensor, proxSensor, accelSensor, pressureSensor;
+    private float ambientLux = -1, proximity = -1, accelMag = 0, pressure = -1;
+    private boolean isStable = false;
+
+    // Recording
+    private boolean recording = false;
+    private FileOutputStream recordStream;
+    private String recordLabel = "";
+    private int recordCount = 0;
+    private Button recordBtn;
+    private TextView tvRecordInfo;
+    private long recordStartTime = 0;
+
+    // Custom view for spectral bar chart
+    static class SpectrumBarView extends View {
+        private Paint paint = new Paint();
+        private float[] values = new float[6];
+        private float maxVal = 1;
+        private String[] labels = {"R", "G", "B", "IR", "C1", "C2"};
+        private int[] colors = {0xFFFF4444, 0xFF44FF44, 0xFF4488FF, 0xFFFF8800, 0xFFCCCCCC, 0xFFAAAA88};
+
+        public SpectrumBarView(Context ctx) { super(ctx); paint.setAntiAlias(true); }
+
+        public void setValues(float r, float g, float b, float ir, float c1, float c2) {
+            values[0] = r; values[1] = g; values[2] = b; values[3] = ir; values[4] = c1; values[5] = c2;
+            maxVal = Math.max(1f, Math.max(ir, Math.max(c2, Math.max(r, Math.max(g, Math.max(b, c1))))));
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            int w = getWidth(), h = getHeight();
+            if (w == 0 || h == 0) return;
+
+            float barW = (w - 14f) / 6f;
+            float labelH = 36f;
+
+            for (int i = 0; i < 6; i++) {
+                float x = 2 + i * (barW + 2);
+                float barH = (h - labelH - 4) * (values[i] / maxVal);
+                float y = h - labelH - barH;
+
+                paint.setColor(colors[i]);
+                paint.setAlpha(200);
+                canvas.drawRect(x, y, x + barW, h - labelH, paint);
+
+                paint.setColor(colors[i]);
+                paint.setAlpha(255);
+                paint.setTextSize(24f);
+                paint.setTextAlign(Paint.Align.CENTER);
+                canvas.drawText(labels[i], x + barW / 2, h - 8, paint);
+
+                paint.setTextSize(18f);
+                paint.setColor(0xFFFFFFFF);
+                String valStr = values[i] > 1000000 ? String.format("%.1fM", values[i] / 1e6) :
+                                values[i] > 1000 ? String.format("%.0fK", values[i] / 1e3) :
+                                String.format("%.0f", values[i]);
+                canvas.drawText(valStr, x + barW / 2, y - 4, paint);
+            }
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        ScrollView scroll = new ScrollView(this);
+        scroll.setBackgroundColor(0xFF0D1117);
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(32, 48, 32, 32);
-        root.setBackgroundColor(Color.parseColor("#1a1a2e"));
+        root.setPadding(24, 32, 24, 24);
 
-        // Wrap in ScrollView for long content
-        ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Color.parseColor("#1a1a2e"));
+        // Header row: title + ready indicator
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        readyIndicator = new View(this);
+        readyIndicator.setBackgroundColor(0xFF444444);
+        header.addView(readyIndicator, new LinearLayout.LayoutParams(24, 24));
+        TextView title = makeLabel("  Fruit Ripeness", 20, "#58A6FF");
+        header.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        root.addView(header);
 
-        // Title
-        TextView title = makeLabel("Fruit Ripeness Analyzer", 24, "#e94560");
-        title.setGravity(Gravity.CENTER);
-        root.addView(title);
-
-        tvStatus = makeLabel("Connecting to daemon...", 14, "#888888");
-        tvStatus.setGravity(Gravity.CENTER);
+        tvStatus = makeLabel("Connecting...", 12, "#8B949E");
         root.addView(tvStatus);
 
-        // Camera preview (above color swatch)
+        // Camera preview (compact)
         textureView = new TextureView(this);
         textureView.setSurfaceTextureListener(this);
-        LinearLayout.LayoutParams cameraParams = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 400);
-        cameraParams.setMargins(0, 16, 0, 16);
-        root.addView(textureView, cameraParams);
+        LinearLayout.LayoutParams camP = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 300);
+        camP.setMargins(0, 8, 0, 0);
+        root.addView(textureView, camP);
 
-        // Capture button
-        Button captureBtn = new Button(this);
-        captureBtn.setText("Capture Frame");
-        captureBtn.setOnClickListener(v -> captureFrame());
-        LinearLayout.LayoutParams btnParams = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT);
-        btnParams.setMargins(0, 0, 0, 16);
-        root.addView(captureBtn, btnParams);
-
-        // Record button + status
-        LinearLayout recordRow = new LinearLayout(this);
-        recordRow.setOrientation(LinearLayout.HORIZONTAL);
+        // Record row
+        LinearLayout recRow = new LinearLayout(this);
+        recRow.setOrientation(LinearLayout.HORIZONTAL);
+        recRow.setGravity(Gravity.CENTER_VERTICAL);
         recordBtn = new Button(this);
-        recordBtn.setText("Record: OFF");
+        recordBtn.setText("REC");
+        recordBtn.setTextColor(0xFFFFFFFF);
+        recordBtn.setBackgroundColor(0xFF21262D);
         recordBtn.setOnClickListener(v -> toggleRecording());
-        recordRow.addView(recordBtn, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        tvRecordStatus = new TextView(this);
-        tvRecordStatus.setText(" ");
-        tvRecordStatus.setTextColor(Color.parseColor("#ff4444"));
-        tvRecordStatus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        recordRow.addView(tvRecordStatus, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        root.addView(recordRow);
+        recRow.addView(recordBtn, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        Button snapBtn = new Button(this);
+        snapBtn.setText("SNAP");
+        snapBtn.setTextColor(0xFFFFFFFF);
+        snapBtn.setBackgroundColor(0xFF21262D);
+        snapBtn.setOnClickListener(v -> captureFrame());
+        recRow.addView(snapBtn, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        tvRecordInfo = makeLabel(" ", 12, "#F85149");
+        recRow.addView(tvRecordInfo, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 2));
+        root.addView(recRow);
 
-        // Color swatch
-        colorSwatch = new View(this);
-        colorSwatch.setMinimumHeight(80);
-        colorSwatch.setBackgroundColor(Color.DKGRAY);
-        LinearLayout.LayoutParams swatchParams = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 80);
-        swatchParams.setMargins(0, 24, 0, 24);
-        root.addView(colorSwatch, swatchParams);
-
-        // Ripeness verdict
-        tvRipeness = makeLabel("---", 32, "#00ff88");
+        // Ripeness verdict (large, central)
+        tvRipeness = makeLabel("---", 28, "#3FB950");
         tvRipeness.setGravity(Gravity.CENTER);
+        tvRipeness.setPadding(0, 8, 0, 8);
         root.addView(tvRipeness);
 
-        // Spectral indices
-        root.addView(makeLabel("Spectral Indices", 16, "#e94560"));
-        tvNDVI = makeLabel("NDVI: ---", 18, "#ffffff");
-        root.addView(tvNDVI);
-        tvRG = makeLabel("R/G: ---", 18, "#ffffff");
-        root.addView(tvRG);
-        tvNIRVIS = makeLabel("NIR/VIS: ---", 18, "#ffffff");
-        root.addView(tvNIRVIS);
+        // Color swatch + lux
+        LinearLayout swatchRow = new LinearLayout(this);
+        swatchRow.setOrientation(LinearLayout.HORIZONTAL);
+        colorSwatch = new View(this);
+        colorSwatch.setBackgroundColor(Color.DKGRAY);
+        swatchRow.addView(colorSwatch, new LinearLayout.LayoutParams(0, 60, 1));
+        tvLux = makeLabel("---", 14, "#C9D1D9");
+        tvLux.setGravity(Gravity.CENTER);
+        swatchRow.addView(tvLux, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        root.addView(swatchRow);
 
-        // Raw channels
-        root.addView(makeLabel("Raw Channels", 16, "#e94560"));
-        tvRed = makeLabel("R: ---", 14, "#ff4444");
-        root.addView(tvRed);
-        tvGreen = makeLabel("G: ---", 14, "#44ff44");
-        root.addView(tvGreen);
-        tvBlue = makeLabel("B: ---", 14, "#4444ff");
-        root.addView(tvBlue);
-        tvIR = makeLabel("IR: ---", 14, "#ff8800");
-        root.addView(tvIR);
-        tvCLR1 = makeLabel("CLR1: ---", 14, "#cccccc");
-        root.addView(tvCLR1);
-        tvCLR2 = makeLabel("CLR2: ---", 14, "#aaaaaa");
-        root.addView(tvCLR2);
+        // Spectral bar chart
+        root.addView(makeLabel("Spectral Channels", 14, "#58A6FF"));
+        spectrumBars = new SpectrumBarView(this);
+        LinearLayout.LayoutParams barP = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 180);
+        barP.setMargins(0, 4, 0, 8);
+        root.addView(spectrumBars, barP);
 
-        // ToF + Lux + Ambient
-        root.addView(makeLabel("940nm + Environment", 16, "#e94560"));
-        tvToF = makeLabel("ToF: ---", 14, "#ffaa00");
-        root.addView(tvToF);
-        tvLux = makeLabel("Lux (spectral est): ---", 14, "#ffffff");
-        root.addView(tvLux);
-        tvAmbientALS = makeLabel("Ambient ALS: ---", 14, "#88ccff");
-        root.addView(tvAmbientALS);
+        // Indices row (compact horizontal)
+        LinearLayout idxRow = new LinearLayout(this);
+        idxRow.setOrientation(LinearLayout.HORIZONTAL);
+        tvNDVI = makeLabel("NDVI: ---", 13, "#C9D1D9");
+        idxRow.addView(tvNDVI, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        tvRG = makeLabel("R/G: ---", 13, "#C9D1D9");
+        idxRow.addView(tvRG, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        tvNIRVIS = makeLabel("NIR: ---", 13, "#C9D1D9");
+        idxRow.addView(tvNIRVIS, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        root.addView(idxRow);
+
+        // Environment row
+        tvEnv = makeLabel("ALS: --- | Dist: --- | ---", 12, "#8B949E");
+        root.addView(tvEnv);
 
         scroll.addView(root);
         setContentView(scroll);
 
-        // Initialize camera manager
         cameraManager = (CameraManager) getSystemService(CAMERA_SERVICE);
-
-        // Initialize Android sensors via SensorManager
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         lightSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT);
         proxSensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
         accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
         pressureSensor = sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE);
-        if (lightSensor != null)
-            sensorManager.registerListener(this, lightSensor, SensorManager.SENSOR_DELAY_UI);
-        if (proxSensor != null)
-            sensorManager.registerListener(this, proxSensor, SensorManager.SENSOR_DELAY_UI);
-        if (accelSensor != null)
-            sensorManager.registerListener(this, accelSensor, SensorManager.SENSOR_DELAY_UI);
-        if (pressureSensor != null)
-            sensorManager.registerListener(this, pressureSensor, SensorManager.SENSOR_DELAY_UI);
 
         startDaemonConnection();
     }
 
-    private TextView makeLabel(String text, int sizeSp, String color) {
+    private TextView makeLabel(String text, int sp, String color) {
         TextView tv = new TextView(this);
         tv.setText(text);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
         tv.setTextColor(Color.parseColor(color));
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT);
-        p.setMargins(0, 4, 0, 4);
-        tv.setLayoutParams(p);
+        tv.setPadding(0, 2, 0, 2);
         return tv;
     }
 
@@ -231,8 +254,7 @@ public class RipenessActivity extends Activity
                 try {
                     socket = new Socket("127.0.0.1", 8765);
                     connected = true;
-                    handler.post(() -> tvStatus.setText("Connected to daemon"));
-
+                    handler.post(() -> tvStatus.setText("Connected"));
                     BufferedReader reader = new BufferedReader(
                         new InputStreamReader(socket.getInputStream()));
                     String line;
@@ -240,7 +262,7 @@ public class RipenessActivity extends Activity
                         processJson(line);
                     }
                 } catch (Exception e) {
-                    handler.post(() -> tvStatus.setText("Waiting for daemon (port 8765)..."));
+                    handler.post(() -> tvStatus.setText("Waiting for daemon..."));
                     try { Thread.sleep(2000); } catch (InterruptedException ie) { break; }
                 }
             }
@@ -253,61 +275,62 @@ public class RipenessActivity extends Activity
             JSONObject raw = obj.getJSONObject("raw");
             JSONObject idx = obj.getJSONObject("idx");
 
-            final double r = raw.getDouble("R");
-            final double g = raw.getDouble("G");
-            final double b = raw.getDouble("B");
-            final double ir = raw.getDouble("IR");
-            final double c1 = raw.getDouble("CLR1");
-            final double c2 = raw.getDouble("CLR2");
+            final float r = (float) raw.getDouble("R");
+            final float g = (float) raw.getDouble("G");
+            final float b = (float) raw.getDouble("B");
+            final float ir = (float) raw.getDouble("IR");
+            final float c1 = (float) raw.getDouble("CLR1");
+            final float c2 = (float) raw.getDouble("CLR2");
             final double gain = obj.getDouble("gain");
+            final double lux = obj.optDouble("lux", (g / gain) / 109.58);
+            final long seq = obj.optLong("seq", 0);
 
             final double ndvi = idx.getDouble("NDVI");
             final double rg = idx.getDouble("RG");
-            final double bg = idx.getDouble("BG");
             final double nirvis = idx.getDouble("NIR_VIS");
-            final double clr = idx.getDouble("CLR");
-            final double ci = idx.getDouble("CI");
 
-            // Estimate lux from green channel
-            final double lux = (g / gain) / 109.58;
-
-            // ToF data if available
             final boolean hasTof = obj.has("tof");
-            final int tofPhotons = hasTof ? obj.getJSONObject("tof").getInt("photons") : 0;
-            final int tofDist = hasTof ? obj.getJSONObject("tof").getInt("dist_mm") : -1;
+            final int tofDist = hasTof ? obj.getJSONObject("tof").optInt("dist_mm", -1) : -1;
+            final int tofPhotons = hasTof ? obj.getJSONObject("tof").optInt("photons", 0) : 0;
 
-            // Simple ripeness classification based on literature indices
             final String ripeness = classifyRipeness(ndvi, rg, nirvis);
 
+            // Measurement readiness: stable + good distance (30-150mm)
+            final boolean distOk = tofDist > 30 && tofDist < 150;
+            final boolean ready = isStable && distOk;
+
             handler.post(() -> {
-                tvNDVI.setText(String.format("NDVI (chlorophyll): %.4f", ndvi));
-                tvRG.setText(String.format("R/G (color shift):  %.4f", rg));
-                tvNIRVIS.setText(String.format("NIR/VIS (water):    %.4f", nirvis));
+                spectrumBars.setValues(r, g, b, ir, c1, c2);
 
-                tvRed.setText(String.format("Red:   %,.0f", r));
-                tvGreen.setText(String.format("Green: %,.0f", g));
-                tvBlue.setText(String.format("Blue:  %,.0f", b));
-                tvIR.setText(String.format("IR:    %,.0f", ir));
-                tvCLR1.setText(String.format("CLR1:  %,.0f", c1));
-                tvCLR2.setText(String.format("CLR2:  %,.0f", c2));
+                tvNDVI.setText(String.format("NDVI:%.3f", ndvi));
+                tvRG.setText(String.format("R/G:%.3f", rg));
+                tvNIRVIS.setText(String.format("NIR:%.2f", nirvis));
 
-                tvLux.setText(String.format("Lux: %.0f  (gain=%.0f)", lux, gain));
-
-                if (hasTof) {
-                    tvToF.setText(String.format("940nm: %,d photons  dist: %dmm", tofPhotons, tofDist));
-                }
-
+                tvLux.setText(String.format("%.0f lux  g=%.0f", lux, gain));
                 tvRipeness.setText(ripeness);
 
-                // Color swatch from spectral ratios
-                double vis = r + g + b;
-                int cr = (int)Math.min(255, 255 * r / vis * 3);
-                int cg = (int)Math.min(255, 255 * g / vis * 3);
-                int cb = (int)Math.min(255, 255 * b / vis * 3);
-                colorSwatch.setBackgroundColor(Color.rgb(cr, cg, cb));
+                // Color swatch from spectral fractions
+                float vis = r + g + b;
+                if (vis > 0) {
+                    int cr = clamp((int)(255 * r / vis * 2.5f), 0, 255);
+                    int cg = clamp((int)(255 * g / vis * 2.5f), 0, 255);
+                    int cb = clamp((int)(255 * b / vis * 2.5f), 0, 255);
+                    colorSwatch.setBackgroundColor(Color.rgb(cr, cg, cb));
+                }
+
+                // Ready indicator
+                readyIndicator.setBackgroundColor(ready ? 0xFF3FB950 : isStable ? 0xFFD29922 : 0xFF444444);
+
+                // Environment line
+                String distStr = tofDist > 0 ? tofDist + "mm" : "---";
+                String photStr = tofPhotons > 0 ? tofPhotons + "ph" : "";
+                String stability = isStable ? "STABLE" : String.format("%.1f", accelMag);
+                tvEnv.setText(String.format("ALS:%.0f  Dist:%s %s  %s  #%d",
+                    ambientLux, distStr, photStr, stability, seq));
 
                 if (recording) {
-                    tvRecordStatus.setText(String.format("REC %s #%d", recordLabel, recordCount));
+                    long elapsed = (System.currentTimeMillis() - recordStartTime) / 1000;
+                    tvRecordInfo.setText(String.format("REC %s  %ds  #%d", recordLabel, elapsed, recordCount));
                 }
             });
 
@@ -318,29 +341,39 @@ public class RipenessActivity extends Activity
                         + ",\"label\":{\"fruit\":\"" + recordLabel.split("_")[0]
                         + "\",\"stage\":\"" + (recordLabel.contains("_") ? recordLabel.split("_", 2)[1] : recordLabel)
                         + "\"},\"als\":" + ambientLux
-                        + ",\"stable\":" + isStable + "}\n";
+                        + ",\"stable\":" + isStable
+                        + ",\"pressure\":" + pressure + "}\n";
                     recordStream.write(augmented.getBytes());
                     recordCount++;
                 } catch (Exception ex) {}
             }
-        } catch (Exception e) {
-            // skip malformed lines
-        }
+        } catch (Exception e) {}
+    }
+
+    private int clamp(int v, int lo, int hi) { return Math.max(lo, Math.min(hi, v)); }
+
+    private String classifyRipeness(double ndvi, double rg, double nirvis) {
+        if (rg > 1.2) return "OVERRIPE";
+        if (rg > 1.0 && ndvi < 0.7) return "RIPE";
+        if (rg > 0.95) return "TURNING";
+        if (ndvi > 0.85) return "UNRIPE";
+        return String.format("R/G=%.3f", rg);
     }
 
     private void toggleRecording() {
         if (recording) {
             recording = false;
-            recordBtn.setText("Record: OFF");
-            tvRecordStatus.setText(String.format("Saved %d samples", recordCount));
+            recordBtn.setText("REC");
+            recordBtn.setBackgroundColor(0xFF21262D);
+            tvRecordInfo.setText(String.format("Saved %d samples", recordCount));
             try { if (recordStream != null) { recordStream.close(); recordStream = null; } }
             catch (Exception e) {}
         } else {
             EditText input = new EditText(this);
             input.setHint("banana_green");
             new AlertDialog.Builder(this)
-                .setTitle("Label for recording")
-                .setMessage("Format: fruit_stage (e.g., banana_green, tomato_red)")
+                .setTitle("Label")
+                .setMessage("fruit_stage (e.g., banana_green)")
                 .setView(input)
                 .setPositiveButton("Start", (d, w) -> {
                     recordLabel = input.getText().toString().trim();
@@ -350,12 +383,14 @@ public class RipenessActivity extends Activity
                     try {
                         recordStream = new FileOutputStream(path);
                         recordCount = 0;
+                        recordStartTime = System.currentTimeMillis();
                         recording = true;
-                        recordBtn.setText("Record: ON");
-                        tvRecordStatus.setText("REC " + recordLabel);
-                        tvStatus.setText("Recording to " + path);
+                        recordBtn.setText("STOP");
+                        recordBtn.setBackgroundColor(0xFFF85149);
+                        tvRecordInfo.setText("REC " + recordLabel);
+                        tvStatus.setText("Recording: " + path);
                     } catch (Exception e) {
-                        tvStatus.setText("Record failed: " + e.getMessage());
+                        tvStatus.setText("Error: " + e.getMessage());
                     }
                 })
                 .setNegativeButton("Cancel", null)
@@ -363,17 +398,7 @@ public class RipenessActivity extends Activity
         }
     }
 
-    private String classifyRipeness(double ndvi, double rg, double nirvis) {
-        // Heuristic based on literature indices (calibrate with real fruit data)
-        // These thresholds are for ambient light baseline, not fruit yet
-        // Real classification needs training data from fruit captures
-        if (rg > 1.2) return "OVERRIPE (high red)";
-        if (rg > 1.0 && ndvi < 0.7) return "RIPE";
-        if (rg > 0.95) return "TURNING";
-        if (ndvi > 0.85) return "UNRIPE (high chlorophyll)";
-        return String.format("AMBIENT (R/G=%.3f)", rg);
-    }
-
+    // SensorEventListener
     @Override
     public void onSensorChanged(SensorEvent event) {
         if (event.sensor.getType() == Sensor.TYPE_LIGHT) {
@@ -387,12 +412,6 @@ public class RipenessActivity extends Activity
         } else if (event.sensor.getType() == Sensor.TYPE_PRESSURE) {
             pressure = event.values[0];
         }
-        handler.post(() -> {
-            String stability = isStable ? "STABLE" : String.format("MOVING (%.1f)", accelMag);
-            String envLine = String.format("ALS:%.0flux Prox:%.0f %s", ambientLux, proximity, stability);
-            if (pressure > 0) envLine += String.format(" %.0fhPa", pressure);
-            tvAmbientALS.setText(envLine);
-        });
     }
 
     @Override
@@ -406,6 +425,10 @@ public class RipenessActivity extends Activity
             sensorManager.registerListener(this, lightSensor, SensorManager.SENSOR_DELAY_UI);
         if (proxSensor != null)
             sensorManager.registerListener(this, proxSensor, SensorManager.SENSOR_DELAY_UI);
+        if (accelSensor != null)
+            sensorManager.registerListener(this, accelSensor, SensorManager.SENSOR_DELAY_UI);
+        if (pressureSensor != null)
+            sensorManager.registerListener(this, pressureSensor, SensorManager.SENSOR_DELAY_UI);
     }
 
     @Override
@@ -419,23 +442,20 @@ public class RipenessActivity extends Activity
     protected void onDestroy() {
         super.onDestroy();
         connected = false;
-        closeCamera();
         try { if (socket != null) socket.close(); } catch (Exception e) {}
     }
 
-    // TextureView.SurfaceTextureListener implementation
+    // TextureView.SurfaceTextureListener
     @Override
     public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-        createCameraPreview(surface);
+        openCamera();
     }
 
     @Override
     public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {}
 
     @Override
-    public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
-        return false;
-    }
+    public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) { return false; }
 
     @Override
     public void onSurfaceTextureUpdated(SurfaceTexture surface) {}
@@ -445,153 +465,74 @@ public class RipenessActivity extends Activity
             cameraThread = new HandlerThread("CameraBackground");
             cameraThread.start();
             cameraHandler = new Handler(cameraThread.getLooper());
-        } catch (Exception e) {
-            tvStatus.setText("Camera error: " + e.getMessage());
-        }
+        } catch (Exception e) {}
     }
 
     private void createCameraPreview(SurfaceTexture surfaceTexture) {
         try {
-            // Set up ImageReader for frame captures (640x480)
-            imageReader = ImageReader.newInstance(640, 480, ImageFormat.NV21, 2);
-            imageReader.setOnImageAvailableListener(reader -> {
-                Image img = reader.acquireLatestImage();
-                if (img != null) img.close();
-            }, cameraHandler);
-
-            // Open rear camera (ID "0" on Pixel 7 Pro)
-            String cameraId = "0";
-            CameraCharacteristics chars = cameraManager.getCameraCharacteristics(cameraId);
-
-            cameraManager.openCamera(cameraId, new CameraDevice.StateCallback() {
-                @Override
-                public void onOpened(CameraDevice camera) {
-                    cameraDevice = camera;
+            surfaceTexture.setDefaultBufferSize(640, 480);
+            Surface surface = new Surface(surfaceTexture);
+            imageReader = ImageReader.newInstance(640, 480, ImageFormat.JPEG, 2);
+            List<Surface> surfaces = new ArrayList<>();
+            surfaces.add(surface);
+            surfaces.add(imageReader.getSurface());
+            CaptureRequest.Builder builder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+            builder.addTarget(surface);
+            cameraDevice.createCaptureSession(surfaces, new CameraCaptureSession.StateCallback() {
+                @Override public void onConfigured(CameraCaptureSession session) {
+                    captureSession = session;
                     startPreview(surfaceTexture);
                 }
-
-                @Override
-                public void onDisconnected(CameraDevice camera) {
-                    camera.close();
-                    cameraDevice = null;
-                }
-
-                @Override
-                public void onError(CameraDevice camera, int error) {
-                    camera.close();
-                    cameraDevice = null;
-                    handler.post(() -> tvStatus.setText("Camera error: " + error));
-                }
+                @Override public void onConfigureFailed(CameraCaptureSession session) {}
             }, cameraHandler);
-        } catch (CameraAccessException e) {
-            handler.post(() -> tvStatus.setText("Camera access denied"));
-        }
+        } catch (Exception e) {}
     }
 
     private void startPreview(SurfaceTexture surfaceTexture) {
         try {
-            Surface previewSurface = new Surface(surfaceTexture);
-            CaptureRequest.Builder previewBuilder = cameraDevice.createCaptureRequest(
-                CameraDevice.TEMPLATE_PREVIEW);
-            previewBuilder.addTarget(previewSurface);
-
-            cameraDevice.createCaptureSession(
-                new ArrayList<Surface>() {{ add(previewSurface); add(imageReader.getSurface()); }},
-                new CameraCaptureSession.StateCallback() {
-                    @Override
-                    public void onConfigured(CameraCaptureSession session) {
-                        captureSession = session;
-                        try {
-                            session.setRepeatingRequest(previewBuilder.build(), null, cameraHandler);
-                        } catch (CameraAccessException e) {
-                            tvStatus.setText("Preview start error");
-                        }
-                    }
-
-                    @Override
-                    public void onConfigureFailed(CameraCaptureSession session) {
-                        tvStatus.setText("Preview config failed");
-                    }
-                }, cameraHandler);
-        } catch (CameraAccessException e) {
-            handler.post(() -> tvStatus.setText("Preview error"));
-        }
+            surfaceTexture.setDefaultBufferSize(640, 480);
+            Surface surface = new Surface(surfaceTexture);
+            CaptureRequest.Builder builder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+            builder.addTarget(surface);
+            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+            captureSession.setRepeatingRequest(builder.build(), null, cameraHandler);
+        } catch (Exception e) {}
     }
 
     private void captureFrame() {
-        if (cameraDevice == null || captureSession == null) {
-            tvStatus.setText("Camera not ready");
-            return;
-        }
-
+        if (cameraDevice == null || imageReader == null) return;
         try {
-            // Capture a single frame to JPEG
-            CaptureRequest.Builder captureBuilder = cameraDevice.createCaptureRequest(
-                CameraDevice.TEMPLATE_STILL_CAPTURE);
-            captureBuilder.addTarget(imageReader.getSurface());
-
-            captureSession.capture(captureBuilder.build(),
-                new CameraCaptureSession.CaptureCallback() {
-                    @Override
-                    public void onCaptureCompleted(CameraCaptureSession session,
-                            CaptureRequest request, android.hardware.camera2.TotalCaptureResult result) {
-                        // Read captured frame
-                        Image image = imageReader.acquireLatestImage();
-                        if (image != null) {
-                            saveImageAsJpeg(image);
-                            image.close();
-                        }
-                    }
-                }, cameraHandler);
-        } catch (CameraAccessException e) {
-            tvStatus.setText("Capture failed");
-        }
+            CaptureRequest.Builder builder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+            builder.addTarget(imageReader.getSurface());
+            imageReader.setOnImageAvailableListener(reader -> {
+                Image image = reader.acquireLatestImage();
+                if (image != null) {
+                    saveImageAsJpeg(image);
+                    image.close();
+                }
+            }, cameraHandler);
+            captureSession.capture(builder.build(), new CameraCaptureSession.CaptureCallback() {}, cameraHandler);
+        } catch (Exception e) {}
     }
 
     private void saveImageAsJpeg(Image image) {
         try {
             ByteBuffer buffer = image.getPlanes()[0].getBuffer();
-            byte[] data = new byte[buffer.remaining()];
-            buffer.get(data);
-
-            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-            File file = new File("/data/local/tmp/ripeness_capture_" + timestamp + ".jpg");
-            FileOutputStream fos = new FileOutputStream(file);
-            fos.write(data);
+            byte[] bytes = new byte[buffer.remaining()];
+            buffer.get(bytes);
+            String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+            String path = "/data/local/tmp/ripeness_snap_" + ts + ".jpg";
+            FileOutputStream fos = new FileOutputStream(path);
+            fos.write(bytes);
             fos.close();
-
-            handler.post(() -> tvStatus.setText("Captured: " + file.getName()));
-        } catch (Exception e) {
-            handler.post(() -> tvStatus.setText("Save failed: " + e.getMessage()));
-        }
+            handler.post(() -> tvStatus.setText("Saved: " + path));
+        } catch (Exception e) {}
     }
 
     private void closeCamera() {
-        if (captureSession != null) {
-            try {
-                captureSession.stopRepeating();
-                captureSession.close();
-            } catch (CameraAccessException e) {}
-            captureSession = null;
-        }
-
-        if (cameraDevice != null) {
-            cameraDevice.close();
-            cameraDevice = null;
-        }
-
-        if (imageReader != null) {
-            imageReader.close();
-            imageReader = null;
-        }
-
-        if (cameraThread != null) {
-            cameraThread.quitSafely();
-            try {
-                cameraThread.join();
-            } catch (InterruptedException e) {}
-            cameraThread = null;
-        }
-        cameraHandler = null;
+        try { if (captureSession != null) { captureSession.close(); captureSession = null; } } catch (Exception e) {}
+        try { if (cameraDevice != null) { cameraDevice.close(); cameraDevice = null; } } catch (Exception e) {}
+        try { if (imageReader != null) { imageReader.close(); imageReader = null; } } catch (Exception e) {}
+        if (cameraThread != null) { cameraThread.quitSafely(); cameraThread = null; }
     }
 }

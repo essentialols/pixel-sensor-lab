@@ -34,6 +34,7 @@
 static volatile int running = 1;
 static int sample_count = 0;
 static int max_samples = 0;
+static unsigned long seq = 0; // monotonic sequence number
 static FILE* out_file = NULL;
 static int server_fd = -1;
 static int client_fd = -1;
@@ -314,13 +315,40 @@ static void emit_json(FILE* out) {
         }
     }
 
-    fprintf(out, "{\"t\":%.3f,\"acc\":%lu,\"gain\":%.0f,"
-            "\"raw\":{\"R\":%.0f,\"G\":%.0f,\"B\":%.0f,\"IR\":%.0f,\"CLR1\":%.0f,\"CLR2\":%.0f},"
-            "\"idx\":{\"NDVI\":%.4f,\"RG\":%.4f,\"BG\":%.4f,\"NIR_VIS\":%.4f,\"CLR\":%.4f,\"CI\":%.4f}",
-            wall, acc, gain, r, g, b, ir, c1, c2, ndvi, rg, bg, nir_vis, clr, cidx);
+    // Lux estimate from green channel (factory calibration: g_to_lux = 109.58)
+    float lux_est = gain > 0 ? (g / gain) / 109.58f : 0;
 
-    if (tof_available && tof_photons > 0) {
-        fprintf(out, ",\"tof\":{\"photons\":%u,\"dist_mm\":%d,\"bins\":[", tof_photons, tof_distance);
+    // Spectral fractions (normalized to visible total)
+    float r_frac = vis > 0 ? r / vis : 0;
+    float g_frac = vis > 0 ? g / vis : 0;
+    float b_frac = vis > 0 ? b / vis : 0;
+
+    seq++;
+
+    fprintf(out, "{\"seq\":%lu,\"t\":%.3f,\"aoc_ts\":%lu,\"gain\":%.0f,\"lux\":%.1f,"
+            "\"raw\":{\"R\":%.0f,\"G\":%.0f,\"B\":%.0f,\"IR\":%.0f,\"CLR1\":%.0f,\"CLR2\":%.0f},"
+            "\"frac\":{\"R\":%.4f,\"G\":%.4f,\"B\":%.4f},"
+            "\"idx\":{\"NDVI\":%.4f,\"RG\":%.4f,\"BG\":%.4f,\"NIR_VIS\":%.4f,\"CLR\":%.4f,\"CI\":%.4f}",
+            seq, wall, acc, gain, lux_est,
+            r, g, b, ir, c1, c2,
+            r_frac, g_frac, b_frac,
+            ndvi, rg, bg, nir_vis, clr, cidx);
+
+    if (tof_available && tof_photons > 0 && tof_photons < 100000000u) {
+        // Compute ToF histogram stats
+        uint32_t peak_val = 0;
+        int peak_bin = 0;
+        double centroid = 0;
+        uint32_t total_valid = tof_photons;
+        for (int i = 0; i < NUM_BINS; i++) {
+            if (tof_bins[i] > peak_val) { peak_val = tof_bins[i]; peak_bin = i; }
+            centroid += (double)i * tof_bins[i];
+        }
+        if (total_valid > 0) centroid /= total_valid;
+
+        fprintf(out, ",\"tof\":{\"photons\":%u,\"dist_mm\":%d,"
+                "\"peak_bin\":%d,\"centroid\":%.2f,\"bins\":[",
+                tof_photons, tof_distance, peak_bin, centroid);
         for (int i = 0; i < NUM_BINS; i++) {
             if (i > 0) fprintf(out, ",");
             fprintf(out, "%u", tof_bins[i]);
