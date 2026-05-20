@@ -74,6 +74,10 @@ public class RipenessActivity extends Activity
     private float ambientLux = -1, proximity = -1, accelMag = 0, pressure = -1;
     private boolean isStable = false;
 
+    // Torch
+    private boolean torchOn = false;
+    private Button torchBtn;
+
     // Recording
     private boolean recording = false;
     private FileOutputStream recordStream;
@@ -176,6 +180,12 @@ public class RipenessActivity extends Activity
         recordBtn.setBackgroundColor(0xFF21262D);
         recordBtn.setOnClickListener(v -> toggleRecording());
         recRow.addView(recordBtn, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        torchBtn = new Button(this);
+        torchBtn.setText("LIGHT");
+        torchBtn.setTextColor(0xFFFFFFFF);
+        torchBtn.setBackgroundColor(0xFF21262D);
+        torchBtn.setOnClickListener(v -> toggleTorch());
+        recRow.addView(torchBtn, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         Button snapBtn = new Button(this);
         snapBtn.setText("SNAP");
         snapBtn.setTextColor(0xFFFFFFFF);
@@ -358,6 +368,17 @@ public class RipenessActivity extends Activity
         if (rg > 0.95) return "TURNING";
         if (ndvi > 0.85) return "UNRIPE";
         return String.format("R/G=%.3f", rg);
+    }
+
+    private void toggleTorch() {
+        try {
+            torchOn = !torchOn;
+            cameraManager.setTorchMode("0", torchOn);
+            torchBtn.setText(torchOn ? "LIGHT ON" : "LIGHT");
+            torchBtn.setBackgroundColor(torchOn ? 0xFFD29922 : 0xFF21262D);
+        } catch (Exception e) {
+            tvStatus.setText("Torch error: " + e.getMessage());
+        }
     }
 
     private void toggleRecording() {
