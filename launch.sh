@@ -23,8 +23,8 @@ echo "=== Starting daemon ==="
 # Kill any existing daemon
 ssh h1 'adb shell su -c "pkill -f ripeness_daemon"' 2>/dev/null || true
 sleep 1
-# Start daemon in background with TCP server
-ssh h1 'adb shell su -c "nohup /data/local/tmp/ripeness_daemon -p 8765 -t 3600 > /dev/null 2>&1 &"' 2>/dev/null
+# Start daemon in headless mode with TCP server and file output
+ssh h1 'adb shell su -c "nohup /data/local/tmp/ripeness_daemon -d -p 8765 -o /data/local/tmp/daemon_log.jsonl > /dev/null 2>&1 &"' 2>/dev/null
 sleep 3
 
 echo "=== Launching app ==="
@@ -32,9 +32,15 @@ ssh h1 'adb shell am start -n com.spectral.ripeness/.RipenessActivity' 2>/dev/nu
 
 echo ""
 echo "=== Running ==="
-echo "Daemon: TCP server on port 8765 (1 hour timeout)"
+echo "Daemon: headless mode, TCP :8765, logging to daemon_log.jsonl"
 echo "App: Fruit Ripeness Analyzer"
 echo ""
-echo "To record data: tap 'Record: OFF' in the app, enter a label"
+echo "Controls:"
+echo "  REC    - Record labeled data (foreground, with UI)"
+echo "  BG     - Background recording (survives app pause)"
+echo "  CAL    - White-reference calibration (hold on white surface)"
+echo "  LIGHT  - Toggle torch for active illumination"
+echo "  SNAP   - Capture camera frame"
+echo ""
 echo "To stop daemon:  ssh h1 'adb shell su -c \"pkill -f ripeness_daemon\"'"
-echo "To pull data:    ssh h1 'adb pull /data/local/tmp/fruit_*.jsonl .'"
+echo "To pull data:    ./tools/pull_data.sh"
