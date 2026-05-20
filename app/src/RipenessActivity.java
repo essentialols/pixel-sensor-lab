@@ -2,18 +2,41 @@ package com.spectral.ripeness;
 
 import android.app.Activity;
 import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.graphics.ImageFormat;
+import android.hardware.camera2.CameraAccessException;
+import android.hardware.camera2.CameraCaptureSession;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraDevice;
+import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.CaptureRequest;
+import android.media.Image;
+import android.media.ImageReader;
 import android.os.Bundle;
+import android.graphics.SurfaceTexture;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Looper;
 import android.view.Gravity;
+import android.view.Surface;
+import android.view.TextureView;
 import android.view.View;
+import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.util.TypedValue;
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.net.Socket;
+import java.nio.ByteBuffer;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
 import org.json.JSONObject;
 
 /**
@@ -22,7 +45,7 @@ import org.json.JSONObject;
  * Connects to ripeness_daemon on localhost:8765, displays live
  * spectral data + ripeness indices.
  */
-public class RipenessActivity extends Activity {
+public class RipenessActivity extends Activity implements TextureView.SurfaceTextureListener {
 
     private TextView tvStatus, tvNDVI, tvRG, tvNIRVIS, tvRipeness;
     private TextView tvRed, tvGreen, tvBlue, tvIR, tvCLR1, tvCLR2;
@@ -32,6 +55,15 @@ public class RipenessActivity extends Activity {
     private Handler handler = new Handler(Looper.getMainLooper());
     private volatile boolean connected = false;
     private Socket socket;
+
+    // Camera2 API fields
+    private TextureView textureView;
+    private CameraManager cameraManager;
+    private CameraDevice cameraDevice;
+    private CameraCaptureSession captureSession;
+    private ImageReader imageReader;
+    private Handler cameraHandler;
+    private HandlerThread cameraThread;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -50,6 +82,24 @@ public class RipenessActivity extends Activity {
         tvStatus = makeLabel("Connecting to daemon...", 14, "#888888");
         tvStatus.setGravity(Gravity.CENTER);
         root.addView(tvStatus);
+
+        // Camera preview (above color swatch)
+        textureView = new TextureView(this);
+        textureView.setSurfaceTextureListener(this);
+        LinearLayout.LayoutParams cameraParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 400);
+        cameraParams.setMargins(0, 16, 0, 16);
+        root.addView(textureView, cameraParams);
+
+        // Capture button
+        Button captureBtn = new Button(this);
+        captureBtn.setText("Capture Frame");
+        captureBtn.setOnClickListener(v -> captureFrame());
+        LinearLayout.LayoutParams btnParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT);
+        btnParams.setMargins(0, 0, 0, 16);
+        root.addView(captureBtn, btnParams);
 
         // Color swatch
         colorSwatch = new View(this);
@@ -97,6 +147,10 @@ public class RipenessActivity extends Activity {
         root.addView(tvLux);
 
         setContentView(root);
+
+        // Initialize camera manager
+        cameraManager = (CameraManager) getSystemService(CAMERA_SERVICE);
+
         startDaemonConnection();
     }
 
@@ -211,9 +265,194 @@ public class RipenessActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        openCamera();
+    }
+
+    @Override
+    protected void onPause() {
+        closeCamera();
+        super.onPause();
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
         connected = false;
+        closeCamera();
         try { if (socket != null) socket.close(); } catch (Exception e) {}
+    }
+
+    // TextureView.SurfaceTextureListener implementation
+    @Override
+    public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
+        createCameraPreview(surface);
+    }
+
+    @Override
+    public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {}
+
+    @Override
+    public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
+        return false;
+    }
+
+    @Override
+    public void onSurfaceTextureUpdated(SurfaceTexture surface) {}
+
+    private void openCamera() {
+        try {
+            cameraThread = new HandlerThread("CameraBackground");
+            cameraThread.start();
+            cameraHandler = new Handler(cameraThread.getLooper());
+        } catch (Exception e) {
+            tvStatus.setText("Camera error: " + e.getMessage());
+        }
+    }
+
+    private void createCameraPreview(SurfaceTexture surfaceTexture) {
+        try {
+            // Set up ImageReader for frame captures (640x480)
+            imageReader = ImageReader.newInstance(640, 480, ImageFormat.NV21, 2);
+            imageReader.setOnImageAvailableListener(reader -> {
+                Image img = reader.acquireLatestImage();
+                if (img != null) img.close();
+            }, cameraHandler);
+
+            // Open rear camera (ID "0" on Pixel 7 Pro)
+            String cameraId = "0";
+            CameraCharacteristics chars = cameraManager.getCameraCharacteristics(cameraId);
+
+            cameraManager.openCamera(cameraId, new CameraDevice.StateCallback() {
+                @Override
+                public void onOpened(CameraDevice camera) {
+                    cameraDevice = camera;
+                    startPreview(surfaceTexture);
+                }
+
+                @Override
+                public void onDisconnected(CameraDevice camera) {
+                    camera.close();
+                    cameraDevice = null;
+                }
+
+                @Override
+                public void onError(CameraDevice camera, int error) {
+                    camera.close();
+                    cameraDevice = null;
+                    handler.post(() -> tvStatus.setText("Camera error: " + error));
+                }
+            }, cameraHandler);
+        } catch (CameraAccessException e) {
+            handler.post(() -> tvStatus.setText("Camera access denied"));
+        }
+    }
+
+    private void startPreview(SurfaceTexture surfaceTexture) {
+        try {
+            Surface previewSurface = new Surface(surfaceTexture);
+            CaptureRequest.Builder previewBuilder = cameraDevice.createCaptureRequest(
+                CameraDevice.TEMPLATE_PREVIEW);
+            previewBuilder.addTarget(previewSurface);
+
+            cameraDevice.createCaptureSession(
+                new ArrayList<Surface>() {{ add(previewSurface); add(imageReader.getSurface()); }},
+                new CameraCaptureSession.StateCallback() {
+                    @Override
+                    public void onConfigured(CameraCaptureSession session) {
+                        captureSession = session;
+                        try {
+                            session.setRepeatingRequest(previewBuilder.build(), null, cameraHandler);
+                        } catch (CameraAccessException e) {
+                            tvStatus.setText("Preview start error");
+                        }
+                    }
+
+                    @Override
+                    public void onConfigureFailed(CameraCaptureSession session) {
+                        tvStatus.setText("Preview config failed");
+                    }
+                }, cameraHandler);
+        } catch (CameraAccessException e) {
+            handler.post(() -> tvStatus.setText("Preview error"));
+        }
+    }
+
+    private void captureFrame() {
+        if (cameraDevice == null || captureSession == null) {
+            tvStatus.setText("Camera not ready");
+            return;
+        }
+
+        try {
+            // Capture a single frame to JPEG
+            CaptureRequest.Builder captureBuilder = cameraDevice.createCaptureRequest(
+                CameraDevice.TEMPLATE_STILL_CAPTURE);
+            captureBuilder.addTarget(imageReader.getSurface());
+
+            captureSession.capture(captureBuilder.build(),
+                new CameraCaptureSession.CaptureCallback() {
+                    @Override
+                    public void onCaptureCompleted(CameraCaptureSession session,
+                            CaptureRequest request, android.hardware.camera2.TotalCaptureResult result) {
+                        // Read captured frame
+                        Image image = imageReader.acquireLatestImage();
+                        if (image != null) {
+                            saveImageAsJpeg(image);
+                            image.close();
+                        }
+                    }
+                }, cameraHandler);
+        } catch (CameraAccessException e) {
+            tvStatus.setText("Capture failed");
+        }
+    }
+
+    private void saveImageAsJpeg(Image image) {
+        try {
+            ByteBuffer buffer = image.getPlanes()[0].getBuffer();
+            byte[] data = new byte[buffer.remaining()];
+            buffer.get(data);
+
+            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+            File file = new File("/data/local/tmp/ripeness_capture_" + timestamp + ".jpg");
+            FileOutputStream fos = new FileOutputStream(file);
+            fos.write(data);
+            fos.close();
+
+            handler.post(() -> tvStatus.setText("Captured: " + file.getName()));
+        } catch (Exception e) {
+            handler.post(() -> tvStatus.setText("Save failed: " + e.getMessage()));
+        }
+    }
+
+    private void closeCamera() {
+        if (captureSession != null) {
+            try {
+                captureSession.stopRepeating();
+                captureSession.close();
+            } catch (CameraAccessException e) {}
+            captureSession = null;
+        }
+
+        if (cameraDevice != null) {
+            cameraDevice.close();
+            cameraDevice = null;
+        }
+
+        if (imageReader != null) {
+            imageReader.close();
+            imageReader = null;
+        }
+
+        if (cameraThread != null) {
+            cameraThread.quitSafely();
+            try {
+                cameraThread.join();
+            } catch (InterruptedException e) {}
+            cameraThread = null;
+        }
+        cameraHandler = null;
     }
 }

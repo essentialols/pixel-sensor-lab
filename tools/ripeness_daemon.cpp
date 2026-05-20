@@ -25,6 +25,8 @@
 #include <pthread.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <sys/ioctl.h>
+#include <linux/input.h>
 #include <android/log.h>
 
 #define ALOG(fmt, ...) __android_log_print(ANDROID_LOG_INFO, "RipenessDaemon", fmt, ##__VA_ARGS__)
@@ -148,6 +150,7 @@ static int init_spectral() {
 #include <linux/i2c-dev.h>
 
 #define RANGING_DEV  "/dev/ispolin_ranging"
+#define INPUT_DEV    "/dev/input/event3"
 #define LWIS_DEV     "/dev/lwis-sensor-nagual"
 #define I2C_DEV      "/dev/i2c-1"
 #define VL53L1_ADDR  0x29
@@ -155,8 +158,11 @@ static int init_spectral() {
 #define HIST_BASE    0x008E
 #define VL53L1_IOCTL_START    _IO('p', 0x01)
 #define VL53L1_IOCTL_STOP     _IO('p', 0x05)
+#define VL53L1_IOCTL_POWER_UP _IO('p', 0x06)
+#define VL53L1_IOCTL_PARAM    0xC014700D
+#define LWIS_IOCTL_POWER_ON   0xC0104C64
 
-static int range_fd = -1, lwis_fd = -1, i2c_fd = -1;
+static int range_fd = -1, lwis_fd = -1, i2c_fd = -1, input_fd = -1;
 static int tof_available = 0;
 
 static int i2c_read_reg16(uint16_t reg, uint8_t *buf, int len) {
@@ -170,34 +176,103 @@ static int i2c_read_reg16(uint16_t reg, uint8_t *buf, int len) {
 }
 
 static int read_tof_histogram(uint32_t bins[NUM_BINS], int *distance_mm) {
-    // Read distance from input event
+    // Try to read distance from input event
     *distance_mm = -1;
+    if (input_fd >= 0) {
+        struct input_event ev;
+        while (read(input_fd, &ev, sizeof(ev)) == (ssize_t)sizeof(ev)) {
+            if (ev.type == EV_ABS && ev.code == 0x13) {
+                *distance_mm = ev.value & 0xFFFF;
+            }
+        }
+    }
 
-    // Read histogram via I2C
+    // Read histogram via I2C (24 bins * 3 bytes per bin)
     if (i2c_fd < 0) return -1;
-    uint8_t raw[NUM_BINS * 2];
+    uint8_t raw[NUM_BINS * 3];
     if (i2c_read_reg16(HIST_BASE, raw, sizeof(raw)) < 0) return -1;
     uint32_t total = 0;
     for (int i = 0; i < NUM_BINS; i++) {
-        bins[i] = (uint32_t)raw[i*2] | ((uint32_t)raw[i*2+1] << 8);
+        bins[i] = ((uint32_t)raw[i*3] << 16) | ((uint32_t)raw[i*3+1] << 8) | raw[i*3+2];
         total += bins[i];
     }
     return total > 0 ? 0 : -1;
 }
 
-static int init_tof() {
+static int lwis_power_on() {
+    struct { uint32_t cmd_id; uint32_t ret; uint64_t pad[8]; } pkt = {};
+    pkt.cmd_id = 0x00010100;
     lwis_fd = open(LWIS_DEV, O_RDWR);
-    if (lwis_fd < 0) { ALOG("ToF: lwis open failed (need camera power)"); return -1; }
+    if (lwis_fd < 0) return -1;
+    if (ioctl(lwis_fd, LWIS_IOCTL_POWER_ON, &pkt) < 0) {
+        close(lwis_fd);
+        lwis_fd = -1;
+        return -1;
+    }
+    return 0;
+}
 
+static int set_tof_param(int id, int val) {
+    struct { uint32_t is_read; uint32_t name; int32_t val; int32_t v2; int32_t st; } p = {};
+    p.name = id;
+    p.val = val;
+    return ioctl(range_fd, VL53L1_IOCTL_PARAM, &p);
+}
+
+static int init_tof() {
+    // Power on via LWIS
+    if (lwis_power_on() < 0) {
+        ALOG("ToF: lwis power failed (need root + setenforce 0)");
+        return -1;
+    }
+    usleep(300000);
+
+    // Open and configure ranging device
     range_fd = open(RANGING_DEV, O_RDWR);
-    if (range_fd < 0) { ALOG("ToF: ranging dev failed"); close(lwis_fd); return -1; }
-
-    if (ioctl(range_fd, VL53L1_IOCTL_START, 0) < 0) {
-        ALOG("ToF: START ioctl failed"); close(range_fd); close(lwis_fd); return -1;
+    if (range_fd < 0) {
+        ALOG("ToF: ranging dev open failed");
+        close(lwis_fd);
+        return -1;
     }
 
+    // Power up and stop before configuring
+    if (ioctl(range_fd, VL53L1_IOCTL_POWER_UP, NULL) < 0) {
+        ALOG("ToF: POWER_UP ioctl failed");
+        close(range_fd);
+        close(lwis_fd);
+        return -1;
+    }
+    usleep(50000);
+
+    if (ioctl(range_fd, VL53L1_IOCTL_STOP, NULL) < 0) {
+        ALOG("ToF: STOP ioctl failed");
+        close(range_fd);
+        close(lwis_fd);
+        return -1;
+    }
+
+    // Set timing budget (2000us = fast mode, ~33Hz)
+    set_tof_param(11, 2000);
+
+    // Start ranging
+    if (ioctl(range_fd, VL53L1_IOCTL_START, NULL) < 0) {
+        ALOG("ToF: START ioctl failed");
+        close(range_fd);
+        close(lwis_fd);
+        return -1;
+    }
+
+    // Open input event device for distance readings
+    input_fd = open(INPUT_DEV, O_RDONLY | O_NONBLOCK);
+    if (input_fd < 0) {
+        ALOG("ToF: input event open failed (distance unavailable)");
+    }
+
+    // Open I2C for histogram reading
     i2c_fd = open(I2C_DEV, O_RDWR);
-    if (i2c_fd < 0) { ALOG("ToF: I2C open failed (histogram unavailable)"); }
+    if (i2c_fd < 0) {
+        ALOG("ToF: I2C open failed (histogram unavailable)");
+    }
 
     tof_available = 1;
     ALOG("ToF sensor initialized");
@@ -352,11 +427,12 @@ int main(int argc, char* argv[]) {
 
     // Cleanup
     if (tof_available && range_fd >= 0) {
-        ioctl(range_fd, VL53L1_IOCTL_STOP, 0);
+        ioctl(range_fd, VL53L1_IOCTL_STOP, NULL);
         close(range_fd);
     }
     if (lwis_fd >= 0) close(lwis_fd);
     if (i2c_fd >= 0) close(i2c_fd);
+    if (input_fd >= 0) close(input_fd);
     if (out_file) fclose(out_file);
     if (client_fd >= 0) close(client_fd);
     if (server_fd >= 0) close(server_fd);
