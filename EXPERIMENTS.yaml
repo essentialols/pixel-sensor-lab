@@ -224,3 +224,34 @@
     LRA resonant freq at 1163Hz could theoretically shift when phone
     touches fruit (mass loading effect).
   verdict: PARTIAL - haptic resonance accessible but needs DSP-level RE
+
+- id: E017
+  date: 2026-05-19
+  session: 4
+  name: RALS normalization end-to-end verification
+  script: tools/ripeness_daemon.cpp (deployed), manual e2e test
+  purpose: Verify RALS-normalized spectral output on live device
+  result: |
+    Daemon produces rals object in every JSON line. 5-sample capture:
+    rals_R=40-143, rals_G=41-148, rals_B=35-126, rals_IR=163-587.
+    Values scale linearly with illumination as expected. Factory
+    calibration factors confirmed: R=950.9 G=1118.0 B=298.9 IR=2577.4
+    CLR1=4909.1 CLR2=4932.7.
+  verdict: SUCCESS - RALS normalization verified on-device
+
+- id: E018
+  date: 2026-05-19
+  session: 4
+  name: Synthetic data pipeline validation
+  script: tools/generate_synthetic.py --validate
+  purpose: Validate ML pipeline with literature-derived spectral profiles
+  result: |
+    Generated 350 samples across 7 classes (banana green/yellow/brown,
+    tomato green/red, avocado firm/ripe) with realistic noise levels.
+    RALS features alone: 100% NC LOO accuracy (7 classes).
+    Indices alone: 94.9%. All features: 94.6% NC, 99.7% kNN.
+    Top features by Fisher criterion: red_frac (95.6), rals_R (88.2),
+    NDVI (83.3), green_frac (62.7), CI (61.1), RG (54.5).
+    Hardest pair: avocado_firm vs tomato_green (both green-skinned).
+    ToF features contribute nothing to classification (expected).
+  verdict: SUCCESS - pipeline validated, 6-channel sensor theoretically sufficient
