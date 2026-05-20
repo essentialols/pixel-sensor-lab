@@ -1,9 +1,14 @@
 package com.spectral.ripeness;
 
 import android.app.Activity;
+import android.content.Context;
 import android.graphics.Color;
 import android.graphics.Bitmap;
 import android.graphics.ImageFormat;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -45,15 +50,21 @@ import org.json.JSONObject;
  * Connects to ripeness_daemon on localhost:8765, displays live
  * spectral data + ripeness indices.
  */
-public class RipenessActivity extends Activity implements TextureView.SurfaceTextureListener {
+public class RipenessActivity extends Activity
+        implements TextureView.SurfaceTextureListener, SensorEventListener {
 
     private TextView tvStatus, tvNDVI, tvRG, tvNIRVIS, tvRipeness;
     private TextView tvRed, tvGreen, tvBlue, tvIR, tvCLR1, tvCLR2;
     private ProgressBar pbRed, pbGreen, pbBlue, pbIR;
-    private TextView tvToF, tvLux;
+    private TextView tvToF, tvLux, tvAmbientALS;
     private View colorSwatch;
     private Handler handler = new Handler(Looper.getMainLooper());
     private volatile boolean connected = false;
+    private SensorManager sensorManager;
+    private Sensor lightSensor, proxSensor, accelSensor;
+    private float ambientLux = -1, proximity = -1;
+    private float accelMag = 0;
+    private boolean isStable = false;
     private Socket socket;
 
     // Camera2 API fields
@@ -139,17 +150,31 @@ public class RipenessActivity extends Activity implements TextureView.SurfaceTex
         tvCLR2 = makeLabel("CLR2: ---", 14, "#aaaaaa");
         root.addView(tvCLR2);
 
-        // ToF + Lux
-        root.addView(makeLabel("940nm + Lux", 16, "#e94560"));
+        // ToF + Lux + Ambient
+        root.addView(makeLabel("940nm + Environment", 16, "#e94560"));
         tvToF = makeLabel("ToF: ---", 14, "#ffaa00");
         root.addView(tvToF);
-        tvLux = makeLabel("Lux: ---", 14, "#ffffff");
+        tvLux = makeLabel("Lux (spectral est): ---", 14, "#ffffff");
         root.addView(tvLux);
+        tvAmbientALS = makeLabel("Ambient ALS: ---", 14, "#88ccff");
+        root.addView(tvAmbientALS);
 
         setContentView(root);
 
         // Initialize camera manager
         cameraManager = (CameraManager) getSystemService(CAMERA_SERVICE);
+
+        // Initialize front ALS (TMD3719) via SensorManager
+        sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        lightSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT);
+        proxSensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
+        accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
+        if (lightSensor != null)
+            sensorManager.registerListener(this, lightSensor, SensorManager.SENSOR_DELAY_UI);
+        if (proxSensor != null)
+            sensorManager.registerListener(this, proxSensor, SensorManager.SENSOR_DELAY_UI);
+        if (accelSensor != null)
+            sensorManager.registerListener(this, accelSensor, SensorManager.SENSOR_DELAY_UI);
 
         startDaemonConnection();
     }
@@ -265,14 +290,40 @@ public class RipenessActivity extends Activity implements TextureView.SurfaceTex
     }
 
     @Override
+    public void onSensorChanged(SensorEvent event) {
+        if (event.sensor.getType() == Sensor.TYPE_LIGHT) {
+            ambientLux = event.values[0];
+        } else if (event.sensor.getType() == Sensor.TYPE_PROXIMITY) {
+            proximity = event.values[0];
+        } else if (event.sensor.getType() == Sensor.TYPE_LINEAR_ACCELERATION) {
+            float x = event.values[0], y = event.values[1], z = event.values[2];
+            accelMag = (float) Math.sqrt(x*x + y*y + z*z);
+            isStable = accelMag < 0.3f;
+        }
+        handler.post(() -> {
+            String stability = isStable ? "STABLE" : String.format("MOVING (%.2f)", accelMag);
+            tvAmbientALS.setText(
+                String.format("ALS: %.0f lux | Prox: %.0f | %s", ambientLux, proximity, stability));
+        });
+    }
+
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+
+    @Override
     protected void onResume() {
         super.onResume();
         openCamera();
+        if (lightSensor != null)
+            sensorManager.registerListener(this, lightSensor, SensorManager.SENSOR_DELAY_UI);
+        if (proxSensor != null)
+            sensorManager.registerListener(this, proxSensor, SensorManager.SENSOR_DELAY_UI);
     }
 
     @Override
     protected void onPause() {
         closeCamera();
+        if (sensorManager != null) sensorManager.unregisterListener(this);
         super.onPause();
     }
 
