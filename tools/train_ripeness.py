@@ -125,7 +125,7 @@ class NearestCentroidClassifier:
         accuracy = correct / total if total > 0 else 0
         print(f"\nAccuracy: {correct}/{total} = {accuracy:.1%}")
 
-        labels = sorted(set(l for l, _ in data))
+        labels = sorted(set(label for _, label in data))
         print(f"\n{'True \\ Pred':<25}", end='')
         for l in labels:
             print(f" {l:<15}", end='')
