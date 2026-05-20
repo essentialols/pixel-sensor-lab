@@ -244,12 +244,7 @@ static int init_tof() {
     }
     usleep(50000);
 
-    if (ioctl(range_fd, VL53L1_IOCTL_STOP, NULL) < 0) {
-        ALOG("ToF: STOP ioctl failed");
-        close(range_fd);
-        close(lwis_fd);
-        return -1;
-    }
+    ioctl(range_fd, VL53L1_IOCTL_STOP, NULL); // may fail if not running, that's OK
 
     // Set timing budget (2000us = fast mode, ~33Hz)
     set_tof_param(11, 2000);

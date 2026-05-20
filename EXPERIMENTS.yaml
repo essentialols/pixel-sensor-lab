@@ -158,3 +158,21 @@
     The UsfApiImpl within UsfSpectralApi context only supports the spectral sensor.
     To access other sensors, a different USF client (not SpectralApi) would be needed.
   verdict: EXPECTED - UsfSpectralApi is VD6282-spectral-specific
+
+- id: E013
+  date: 2026-05-19
+  session: 3
+  name: Multi-sensor daemon (VD6282 spectral + VL53L1 ToF + Camera2)
+  script: tools/ripeness_daemon.cpp + app/src/RipenessActivity.java
+  purpose: Combine all available sensors into a single fruit ripeness capture app
+  result: |
+    All three sensors operational:
+      VD6282 spectral: 6 channels at 7.8Hz (unchanged)
+      VL53L1 ToF: 24-bin histogram + distance, 940nm reflectance
+      Camera2: rear preview at 640x480 with frame capture button
+    Fix: STOP ioctl before START returns error on cold sensor (expected),
+    removed fatal error check to match working tof.c behavior.
+    Sample JSON output includes spectral + ToF fused:
+      {"raw":{"R":937484,...},"idx":{"NDVI":0.8267,...},
+       "tof":{"photons":264,"dist_mm":178,"bins":[4,3,2,...,0]}}
+  verdict: MILESTONE - 3-sensor fusion working in single app
