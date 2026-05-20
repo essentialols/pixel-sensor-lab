@@ -176,3 +176,22 @@
       {"raw":{"R":937484,...},"idx":{"NDVI":0.8267,...},
        "tof":{"photons":264,"dist_mm":178,"bins":[4,3,2,...,0]}}
   verdict: MILESTONE - 3-sensor fusion working in single app
+
+- id: E014
+  date: 2026-05-19
+  session: 3
+  name: 5-sensor app with in-app recording
+  script: app/src/RipenessActivity.java + tools/ripeness_daemon.cpp
+  purpose: Complete self-contained fruit ripeness measurement and data collection app
+  result: |
+    5 sensors active in single app:
+      1. VD6282 spectral (6-ch, 7.8Hz) via native daemon
+      2. VL53L1 ToF (24-bin histogram, 940nm, distance) via daemon
+      3. Camera2 rear (640x480 preview + JPEG capture)
+      4. TMD3719 front ALS (ambient lux via SensorManager)
+      5. LSM6DSV IMU (stability detection via linear acceleration)
+    In-app recording: Record button -> label dialog -> saves labeled JSONL
+    with spectral + ToF + ambient + stability data.
+    ML pipeline: capture_fruit.sh or in-app Record -> train_ripeness.py
+    -> nearest-centroid classifier -> predict on new data.
+  verdict: MILESTONE - feature-complete fruit ripeness measurement system
