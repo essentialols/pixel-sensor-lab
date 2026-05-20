@@ -331,6 +331,10 @@ static int build_json(char* buf, size_t bufsz) {
         r_frac, g_frac, b_frac,
         ndvi, rg, bg, nir_vis, clr, cidx);
 
+    off += snprintf(buf + off, bufsz - off,
+        ",\"rals\":{\"R\":%.4f,\"G\":%.4f,\"B\":%.4f,\"IR\":%.4f,\"CLR1\":%.4f,\"CLR2\":%.4f}",
+        r / 950.9f, g / 1118.0f, b / 298.9f, ir / 2577.4f, c1 / 4909.1f, c2 / 4932.7f);
+
     if (tof_available && tof_photons > 0 && tof_photons < 100000000u) {
         uint32_t peak_val = 0;
         int peak_bin = 0;

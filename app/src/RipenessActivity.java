@@ -86,9 +86,15 @@ public class RipenessActivity extends Activity
     private FileOutputStream recordStream;
     private String recordLabel = "";
     private int recordCount = 0;
-    private Button recordBtn, bgBtn;
+    private Button recordBtn, bgBtn, calBtn;
     private TextView tvRecordInfo;
     private long recordStartTime = 0;
+
+    // White-reference calibration
+    private volatile boolean calibrating = false;
+    private int calSampleCount = 0;
+    private float[] calSum = new float[6];
+    private volatile float[] whiteRef = null;
 
     // Custom view for spectral bar chart
     static class SpectrumBarView extends View {
@@ -201,6 +207,12 @@ public class RipenessActivity extends Activity
         bgBtn.setBackgroundColor(0xFF21262D);
         bgBtn.setOnClickListener(v -> toggleBgRecording());
         recRow.addView(bgBtn, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        calBtn = new Button(this);
+        calBtn.setText("CAL");
+        calBtn.setTextColor(0xFFFFFFFF);
+        calBtn.setBackgroundColor(0xFF21262D);
+        calBtn.setOnClickListener(v -> toggleCalibration());
+        recRow.addView(calBtn, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         tvRecordInfo = makeLabel(" ", 12, "#F85149");
         recRow.addView(tvRecordInfo, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 2));
         root.addView(recRow);
@@ -318,8 +330,31 @@ public class RipenessActivity extends Activity
             final boolean distOk = tofDist > 30 && tofDist < 150;
             final boolean ready = isStable && distOk;
 
+            if (calibrating) {
+                calSum[0] += r; calSum[1] += g; calSum[2] += b;
+                calSum[3] += ir; calSum[4] += c1; calSum[5] += c2;
+                calSampleCount++;
+                if (calSampleCount >= 20) {
+                    calibrating = false;
+                    whiteRef = new float[6];
+                    for (int i = 0; i < 6; i++) whiteRef[i] = calSum[i] / 20f;
+                    handler.post(() -> {
+                        calBtn.setText("CAL OK");
+                        calBtn.setBackgroundColor(0xFF3FB950);
+                        tvStatus.setText(String.format("Calibrated: R=%.0f G=%.0f B=%.0f",
+                            whiteRef[0], whiteRef[1], whiteRef[2]));
+                    });
+                }
+            }
+
+            final float[] ref = whiteRef;
             handler.post(() -> {
-                spectrumBars.setValues(r, g, b, ir, c1, c2);
+                if (ref != null) {
+                    spectrumBars.setValues(r/ref[0]*100, g/ref[1]*100,
+                        b/ref[2]*100, ir/ref[3]*100, c1/ref[4]*100, c2/ref[5]*100);
+                } else {
+                    spectrumBars.setValues(r, g, b, ir, c1, c2);
+                }
 
                 tvNDVI.setText(String.format("NDVI:%.3f", ndvi));
                 tvRG.setText(String.format("R/G:%.3f", rg));
@@ -361,7 +396,16 @@ public class RipenessActivity extends Activity
                         + "\",\"stage\":\"" + (recordLabel.contains("_") ? recordLabel.split("_", 2)[1] : recordLabel)
                         + "\"},\"als\":" + ambientLux
                         + ",\"stable\":" + isStable
-                        + ",\"pressure\":" + pressure + "}\n";
+                        + ",\"pressure\":" + pressure;
+                    if (ref != null) {
+                        augmented += ",\"refl\":{\"R\":" + (r / ref[0])
+                            + ",\"G\":" + (g / ref[1])
+                            + ",\"B\":" + (b / ref[2])
+                            + ",\"IR\":" + (ir / ref[3])
+                            + ",\"CLR1\":" + (c1 / ref[4])
+                            + ",\"CLR2\":" + (c2 / ref[5]) + "}";
+                    }
+                    augmented += "}\n";
                     recordStream.write(augmented.getBytes());
                     recordCount++;
                 } catch (Exception ex) {}
@@ -425,6 +469,22 @@ public class RipenessActivity extends Activity
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
+        }
+    }
+
+    private void toggleCalibration() {
+        if (whiteRef != null) {
+            whiteRef = null;
+            calBtn.setText("CAL");
+            calBtn.setBackgroundColor(0xFF21262D);
+            tvStatus.setText("Calibration cleared");
+        } else if (!calibrating) {
+            calibrating = true;
+            calSampleCount = 0;
+            calSum = new float[6];
+            calBtn.setText("CAL...");
+            calBtn.setBackgroundColor(0xFFD29922);
+            tvStatus.setText("Hold sensor against white surface...");
         }
     }
 

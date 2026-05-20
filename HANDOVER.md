@@ -1,7 +1,7 @@
 # Handover: Pixel 7 Pro Fruit Ripeness Sensor System
 
 **Last updated:** 2026-05-19, Session 3
-**Status:** Feature-complete measurement system, awaiting fruit data collection
+**Status:** Feature-complete measurement + background recording system, awaiting fruit data collection
 
 ## Quick Start
 
@@ -30,7 +30,7 @@ $CC -std=c++17 -O2 -static-libstdc++ \
 BUILD_TOOLS=~/Library/Android/sdk/build-tools/35.0.0
 PLATFORM=~/Library/Android/sdk/platforms/android-35
 javac -source 1.8 -target 1.8 -classpath "$PLATFORM/android.jar" \
-    -d app/obj app/src/RipenessActivity.java
+    -d app/obj app/src/RipenessActivity.java app/src/RecordingService.java app/src/RecordingService.java
 $BUILD_TOOLS/d8 --output app/dex $(find app/obj -name "*.class")
 $BUILD_TOOLS/aapt package -f -M app/AndroidManifest.xml -S app/res \
     -I "$PLATFORM/android.jar" -F app/ripeness-unsigned.apk
@@ -57,12 +57,15 @@ Phone (rooted, SELinux permissive)
   ripeness_daemon (root, native C++)
     VD6282 spectral: dlopen libusf.so -> UsfSpectralApi -> cookie injection
     VL53L1 ToF: LWIS power-on -> ioctl START -> I2C histogram
-    Output: JSON lines on TCP :8765 or stdout
+    Output: JSON lines on TCP :8765 or stdout (raw + RALS-normalized + indices)
   RipenessActivity (APK, user-space)
     Connects to daemon on localhost:8765
     Camera2 preview + capture
     SensorManager: ALS, IMU, barometer
     Record button: saves labeled JSONL to /data/local/tmp/
+  RecordingService (APK, foreground service)
+    Connects to daemon TCP, records labeled JSONL in background
+    Survives activity pause, notification with stop action
 ```
 
 ## Key Technique: USF Cookie Injection
@@ -93,6 +96,10 @@ Data flows: AOC -> USF transport -> SensorEventCallback -> our callback
 
 **In-app:** Tap "Record: OFF" -> enter label (e.g., `banana_green`) -> point rear sensor at fruit -> tap "Record: ON" to stop.
 
+**Background:** Tap "BG" -> enter label -> app can be backgrounded. Stop via notification or BG STOP button.
+
+**Calibrate:** Tap "CAL" with sensor on white reference surface. Bars switch to % reflectance. Recorded data includes reflectance when calibrated.
+
 **CLI:** `./tools/capture_fruit.sh banana green 50`
 
 **Analysis:** `python3 tools/train_ripeness.py data/fruit/`
@@ -103,6 +110,7 @@ Data flows: AOC -> USF transport -> SensorEventCallback -> our callback
 | ---------------------------------------- | ------------------------------------- |
 | `tools/ripeness_daemon.cpp`              | Native daemon (spectral + ToF)        |
 | `app/src/RipenessActivity.java`          | APK source                            |
+| `app/src/RecordingService.java`          | Background recording service          |
 | `tools/spectral_usf/spectral_reader.cpp` | Standalone spectral capture           |
 | `tools/analyze_spectral.py`              | Spectral statistics + Allan deviation |
 | `tools/calibrate_spectral.py`            | RALS normalization                    |
@@ -118,8 +126,8 @@ Data flows: AOC -> USF transport -> SensorEventCallback -> our callback
 
 ## What's Next
 
-1. **Collect fruit data** (banana green/yellow/brown is recommended first)
-2. **Train classifier** on labeled data
+1. **Collect fruit data** (banana green/yellow/brown recommended first, calibrate against white reference)
+2. **Train classifier** on calibrated reflectance data (RALS + white-ref features auto-extracted)
 3. **Evaluate** against Lauretti 2025 benchmarks (93.72% with 11-ch)
-4. **Optimize** feature selection (which of the 7 effective channels matter most)
-5. **Consider** active illumination via phone flashlight for reflectance mode
+4. **Optimize** feature selection (which channels matter most for each fruit)
+5. **Active illumination** profiles (torch on vs ambient, paired measurements)

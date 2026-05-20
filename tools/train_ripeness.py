@@ -13,6 +13,8 @@ import sys
 import os
 import math
 
+RALS_FACTORS = {'R': 950.9, 'G': 1118.0, 'B': 298.9, 'IR': 2577.4, 'CLR1': 4909.1, 'CLR2': 4932.7}
+
 def extract_features(obj):
     if 'raw' not in obj or 'idx' not in obj:
         return None
@@ -20,7 +22,6 @@ def extract_features(obj):
     idx = obj['idx']
     vis = raw['R'] + raw['G'] + raw['B']
 
-    # Use pre-computed fractions if available (brightness-invariant)
     frac = obj.get('frac', {})
 
     features = {
@@ -35,6 +36,14 @@ def extract_features(obj):
         'blue_frac': frac.get('B', raw['B'] / vis if vis > 0 else 0),
         'lux': obj.get('lux', (raw['G'] / obj.get('gain', 33)) / 109.58),
     }
+
+    for ch, factor in RALS_FACTORS.items():
+        features[f'rals_{ch}'] = raw.get(ch, 0) / factor
+
+    refl = obj.get('refl', {})
+    if refl:
+        for ch in ('R', 'G', 'B', 'IR', 'CLR1', 'CLR2'):
+            features[f'refl_{ch}'] = refl.get(ch, 0)
 
     if 'tof' in obj and obj['tof'].get('photons', 0) > 0 and obj['tof']['photons'] < 1e8:
         tof = obj['tof']
@@ -68,6 +77,14 @@ def load_labeled_data(dirpath):
                     continue
                 label = f"{obj['label']['fruit']}_{obj['label']['stage']}"
                 data.append((features, label))
+
+    if len(data) > 1:
+        common_keys = set(data[0][0].keys())
+        for features, _ in data[1:]:
+            common_keys &= set(features.keys())
+        data = [({k: v for k, v in f.items() if k in common_keys}, label)
+                for f, label in data]
+
     return data
 
 class NearestCentroidClassifier:
