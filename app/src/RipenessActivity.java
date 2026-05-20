@@ -1,7 +1,9 @@
 package com.spectral.ripeness;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
+import android.widget.EditText;
 import android.graphics.Color;
 import android.graphics.Bitmap;
 import android.graphics.ImageFormat;
@@ -65,6 +67,14 @@ public class RipenessActivity extends Activity
     private float ambientLux = -1, proximity = -1;
     private float accelMag = 0;
     private boolean isStable = false;
+
+    // Recording mode
+    private boolean recording = false;
+    private FileOutputStream recordStream;
+    private String recordLabel = "";
+    private int recordCount = 0;
+    private Button recordBtn;
+    private TextView tvRecordStatus;
     private Socket socket;
 
     // Camera2 API fields
@@ -111,6 +121,20 @@ public class RipenessActivity extends Activity
             LinearLayout.LayoutParams.WRAP_CONTENT);
         btnParams.setMargins(0, 0, 0, 16);
         root.addView(captureBtn, btnParams);
+
+        // Record button + status
+        LinearLayout recordRow = new LinearLayout(this);
+        recordRow.setOrientation(LinearLayout.HORIZONTAL);
+        recordBtn = new Button(this);
+        recordBtn.setText("Record: OFF");
+        recordBtn.setOnClickListener(v -> toggleRecording());
+        recordRow.addView(recordBtn, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        tvRecordStatus = new TextView(this);
+        tvRecordStatus.setText(" ");
+        tvRecordStatus.setTextColor(Color.parseColor("#ff4444"));
+        tvRecordStatus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        recordRow.addView(tvRecordStatus, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        root.addView(recordRow);
 
         // Color swatch
         colorSwatch = new View(this);
@@ -272,9 +296,61 @@ public class RipenessActivity extends Activity
                 int cg = (int)Math.min(255, 255 * g / vis * 3);
                 int cb = (int)Math.min(255, 255 * b / vis * 3);
                 colorSwatch.setBackgroundColor(Color.rgb(cr, cg, cb));
+
+                if (recording) {
+                    tvRecordStatus.setText(String.format("REC %s #%d", recordLabel, recordCount));
+                }
             });
+
+            // Save to file if recording
+            if (recording && recordStream != null) {
+                try {
+                    String augmented = json.substring(0, json.length() - 1)
+                        + ",\"label\":{\"fruit\":\"" + recordLabel.split("_")[0]
+                        + "\",\"stage\":\"" + (recordLabel.contains("_") ? recordLabel.split("_", 2)[1] : recordLabel)
+                        + "\"},\"als\":" + ambientLux
+                        + ",\"stable\":" + isStable + "}\n";
+                    recordStream.write(augmented.getBytes());
+                    recordCount++;
+                } catch (Exception ex) {}
+            }
         } catch (Exception e) {
             // skip malformed lines
+        }
+    }
+
+    private void toggleRecording() {
+        if (recording) {
+            recording = false;
+            recordBtn.setText("Record: OFF");
+            tvRecordStatus.setText(String.format("Saved %d samples", recordCount));
+            try { if (recordStream != null) { recordStream.close(); recordStream = null; } }
+            catch (Exception e) {}
+        } else {
+            EditText input = new EditText(this);
+            input.setHint("banana_green");
+            new AlertDialog.Builder(this)
+                .setTitle("Label for recording")
+                .setMessage("Format: fruit_stage (e.g., banana_green, tomato_red)")
+                .setView(input)
+                .setPositiveButton("Start", (d, w) -> {
+                    recordLabel = input.getText().toString().trim();
+                    if (recordLabel.isEmpty()) recordLabel = "unlabeled";
+                    String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+                    String path = "/data/local/tmp/fruit_" + recordLabel + "_" + ts + ".jsonl";
+                    try {
+                        recordStream = new FileOutputStream(path);
+                        recordCount = 0;
+                        recording = true;
+                        recordBtn.setText("Record: ON");
+                        tvRecordStatus.setText("REC " + recordLabel);
+                        tvStatus.setText("Recording to " + path);
+                    } catch (Exception e) {
+                        tvStatus.setText("Record failed: " + e.getMessage());
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
         }
     }
 
