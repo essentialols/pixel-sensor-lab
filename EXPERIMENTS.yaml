@@ -195,3 +195,32 @@
     ML pipeline: capture_fruit.sh or in-app Record -> train_ripeness.py
     -> nearest-centroid classifier -> predict on new data.
   verdict: MILESTONE - feature-complete fruit ripeness measurement system
+
+- id: E015
+  date: 2026-05-19
+  session: 3
+  name: Distance vs spectral characterization
+  script: tools/ripeness_daemon.cpp (200 samples)
+  purpose: Check if spectral readings vary with ToF-measured distance
+  result: |
+    200 samples at 177mm mean distance (8.7mm std). Spectral readings
+    are distance-independent at this range (correlation r=0.10).
+    ToF photons also uncorrelated with distance (r=0.025).
+    Saved to data/distance_characterization_E015.jsonl.
+  verdict: SUCCESS - spectral readings are distance-invariant at table range
+
+- id: E016
+  date: 2026-05-19
+  session: 3
+  name: CS40L26 haptic resonance exploration
+  script: sysfs reads + cmd vibrator_manager
+  purpose: Investigate haptic actuator BEMF sensing for fruit firmness
+  result: |
+    CS40L26 (I2C 8-0043) communicates, DEVID=0x0040A260 confirmed.
+    Sysfs exposes calibration params: f0_stored=1163.0Hz, redc=3.166 ohms.
+    trigger_calibration write accepted but f0_measured returns EFAULT
+    (calibration DSP needs actuator driving, not just sysfs trigger).
+    Vibrator service works (cmd vibrator_manager synced oneshot 200).
+    LRA resonant freq at 1163Hz could theoretically shift when phone
+    touches fruit (mass loading effect).
+  verdict: PARTIAL - haptic resonance accessible but needs DSP-level RE
