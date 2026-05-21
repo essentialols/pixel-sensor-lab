@@ -31,7 +31,7 @@ Each sensor gets its own project repo with kernel-level tools, raw data extracti
 | --------------------- | --------------- | ------------------------------ | ------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | UWB radio rangefinder | Qorvo DW3000    | `dw3000.ko` + `mcps802154*.ko` | [pixel-uwb-rangefinder](../pixel-uwb-rangefinder)       | **Session 5** -- DW3000 on spi16.0, all modules built from source, custom kernel building |
 | Dual magnetometer     | MEMSIC MMC56X3X | AOC sensor hub                 | [pixel-mag-gradiometer](../pixel-mag-gradiometer)       | **Session 1** -- 0.061 uT sensitivity via accidental fluxgate effect, metal detector app  |
-| Fingerprint camera    | Goodix optical  | `goodixfp.ko`                  | [pixel-fingerprint-camera](../pixel-fingerprint-camera) | **Session 0** -- scaffolding + recon tools, true binary RE of closed driver               |
+| Fingerprint camera    | Goodix Delmar   | `goodixfp.ko`                  | [pixel-fingerprint-camera](../pixel-fingerprint-camera) | **Session 2** -- full hw control, 14 ioctls decoded, TEE boundary mapped, OLED HBM works  |
 
 ### Candidate sensors (not yet started)
 
