@@ -282,7 +282,7 @@ strings /vendor/firmware/* | grep -iE 'bcm|qorvo|skyworks|qualcomm|murata|melexi
 | `sensors/tof-rangefinder/`    | VL53L1 (LDAF)   | Working | 2.3 um precision, 340 Hz, raw photon histograms via BPF kprobes. 1900x better than stock |
 | `sensors/uwb-rangefinder/`    | DW3000 (UWB)    | Working | 64-bin Channel Impulse Response at 16.7fps via patched dw3000.ko                         |
 | `sensors/fingerprint-camera/` | Goodix (UDFPS)  | Early   | Goal: raw monochrome frames from optical fingerprint sensor                              |
-| `sensors/amp-eavesdrop/`      | CS35L41 (x2)    | Phase 1 | Novel: speaker amp VMON/IMON as covert microphone (no published attack)                  |
+| `sensors/amp-eavesdrop/`      | CS35L41 (x2)    | Paper   | Novel: speaker amp VMON/IMON as covert microphone. 10pp USENIX Security paper draft      |
 
 ## Related repos (not submodules)
 
