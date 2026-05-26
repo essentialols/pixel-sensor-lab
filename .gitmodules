@@ -1,0 +1,12 @@
+[submodule "sensors/mag-gradiometer"]
+	path = sensors/mag-gradiometer
+	url = https://github.com/essentialols/pixel-mag-gradiometer.git
+[submodule "sensors/tof-rangefinder"]
+	path = sensors/tof-rangefinder
+	url = https://github.com/essentialols/pixel-tof-rangefinder.git
+[submodule "sensors/uwb-rangefinder"]
+	path = sensors/uwb-rangefinder
+	url = https://github.com/essentialols/pixel-uwb-rangefinder.git
+[submodule "sensors/fingerprint-camera"]
+	path = sensors/fingerprint-camera
+	url = https://github.com/essentialols/pixel-fingerprint-camera.git
