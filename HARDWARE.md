@@ -203,13 +203,26 @@ closer to a spectrometer than a simple light sensor. Flicker detection for LED P
 - **Raw access**: Exposed as `/dev/stmvl53l1` input device on rooted devices.
   LWIS module provides ioctl interface for raw ranging measurements.
 
-### Haptic motor (CS40L25) -- RESEARCH DEMONSTRATED AS SENSOR
+### Speaker amplifier (CS35L41 x2) -- ACTIVE RESEARCH TARGET
 
-- **LRA as pressure sensor** (Google Research, CHI 2022): Back-EMF sensing from the
-  vibration motor detects surface type, pressure, and contact. Quadratic response to force.
-- **LRA as microphone**: The motor physically responds to sound pressure waves.
-  With sufficient sampling of the back-EMF, crude audio could theoretically be recovered.
+- **VMON/IMON feedback as covert microphone** (novel, unpublished): The CS35L41 smart
+  amplifier has built-in voltage (VMON) and current (IMON) monitoring ADCs for speaker
+  protection. When no audio is playing, ambient sound vibrating the speaker cone generates
+  back-EMF detectable on these channels. Architecturally distinct from Speake(a)r (which
+  used audio codec jack retasking). NXP TFA9911 proves speaker-as-microphone via smart amp
+  is commercially feasible; no academic security paper has demonstrated this as an attack.
+- **Stereo capture**: Two CS35L41 chips enable binaural audio recovery.
+- **Access**: I2C registers for VMON/IMON data; also exposed on I2S/TDM feedback bus.
+- **Experiment repo**: `sensors/amp-eavesdrop/`
+
+### Haptic motor (CS40L25) -- PUBLISHED ATTACK EXISTS
+
+- **VibraPhone** (Roy & Choudhury, MobiSys 2016): Demonstrated >80% word intelligibility
+  from vibration motor back-EMF. This attack is already published at a top venue.
+- **LRA as sensor** (Dementyev et al., UIST 2020): Back-EMF sensing detects surface
+  type, pressure, and contact.
 - **Surface fingerprinting**: Different surfaces produce different vibration damping signatures.
+- Not a novel research target for eavesdropping.
 
 ### Touch controller (FTM5) -- GESTURE DATA
 
@@ -269,6 +282,7 @@ strings /vendor/firmware/* | grep -iE 'bcm|qorvo|skyworks|qualcomm|murata|melexi
 | `sensors/tof-rangefinder/`    | VL53L1 (LDAF)   | Working | 2.3 um precision, 340 Hz, raw photon histograms via BPF kprobes. 1900x better than stock |
 | `sensors/uwb-rangefinder/`    | DW3000 (UWB)    | Working | 64-bin Channel Impulse Response at 16.7fps via patched dw3000.ko                         |
 | `sensors/fingerprint-camera/` | Goodix (UDFPS)  | Early   | Goal: raw monochrome frames from optical fingerprint sensor                              |
+| `sensors/amp-eavesdrop/`      | CS35L41 (x2)    | Phase 1 | Novel: speaker amp VMON/IMON as covert microphone (no published attack)                  |
 
 ## Related repos (not submodules)
 

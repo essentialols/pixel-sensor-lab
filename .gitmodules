@@ -10,3 +10,6 @@
 [submodule "sensors/fingerprint-camera"]
 	path = sensors/fingerprint-camera
 	url = https://github.com/essentialols/pixel-fingerprint-camera.git
+[submodule "sensors/amp-eavesdrop"]
+	path = sensors/amp-eavesdrop
+	url = https://github.com/essentialols/amp-eavesdrop.git
