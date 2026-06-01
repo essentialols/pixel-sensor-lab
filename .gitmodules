@@ -13,3 +13,6 @@
 [submodule "sensors/amp-eavesdrop"]
 	path = sensors/amp-eavesdrop
 	url = https://github.com/essentialols/amp-eavesdrop.git
+[submodule "sensors/tpu-cpa"]
+	path = sensors/tpu-cpa
+	url = https://github.com/essentialols/pixel-tpu-cpa.git
