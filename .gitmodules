@@ -22,3 +22,7 @@
 	path = sensors/tpu-cpa
 	url = https://github.com/essentialols/pixel-tpu-cpa.git
 	branch = main
+[submodule "sensors/haptic-microphone"]
+	path = sensors/haptic-microphone
+	url = https://github.com/essentialols/haptic-microphone.git
+	branch = main
