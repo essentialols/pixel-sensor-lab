@@ -27,12 +27,12 @@ Each sensor gets its own project repo with kernel-level tools, raw data extracti
 
 ### Active projects
 
-| Sensor                | Chip            | Kernel module                       | Project                                                 | Status                                                                                       |
-| --------------------- | --------------- | ----------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| UWB radio rangefinder | Qorvo DW3000    | `dw3000.ko` + `mcps802154*.ko`      | [pixel-uwb-rangefinder](../pixel-uwb-rangefinder)       | **Session 5** -- DW3000 on spi16.0, all modules built from source, custom kernel building    |
-| Dual magnetometer     | MEMSIC MMC56X3X | AOC sensor hub                      | [pixel-mag-gradiometer](../pixel-mag-gradiometer)       | **Session 1** -- 0.061 uT sensitivity via accidental fluxgate effect, metal detector app     |
-| Fingerprint camera    | Goodix Delmar   | `goodixfp.ko`                       | [pixel-fingerprint-camera](../pixel-fingerprint-camera) | **Session 4** -- DMA captures during enrollment, TEE feature data extracted, 20+ experiments |
-| EdgeTPU (CPA/matmul)  | DarwiNN v2      | `edgetpu_platform` (`/dev/janeiro`) | [pixel-tpu-cpa](../pixel-tpu-cpa) (canonical repo)      | **E043** -- 43 experiments, full firmware decompile, 1.92 TOPS measured, INT4 execution next |
+| Sensor                | Chip            | Kernel module                       | Project                                                 | Status                                                                                        |
+| --------------------- | --------------- | ----------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| UWB radio rangefinder | Qorvo DW3000    | `dw3000.ko` + `mcps802154*.ko`      | [pixel-uwb-rangefinder](../pixel-uwb-rangefinder)       | **Session 5** -- DW3000 on spi16.0, all modules built from source, custom kernel building     |
+| Dual magnetometer     | MEMSIC MMC56X3X | AOC sensor hub                      | [pixel-mag-gradiometer](../pixel-mag-gradiometer)       | **Session 1** -- 0.061 uT sensitivity via accidental fluxgate effect, metal detector app      |
+| Fingerprint camera    | Goodix Delmar   | `goodixfp.ko`                       | [pixel-fingerprint-camera](../pixel-fingerprint-camera) | **Session 4** -- DMA captures during enrollment, TEE feature data extracted, 20+ experiments  |
+| EdgeTPU (CPA/matmul)  | DarwiNN v2      | `edgetpu_platform` (`/dev/janeiro`) | [pixel-tpu-cpa](../pixel-tpu-cpa) (canonical repo)      | **E053** -- 53+ experiments, full firmware decompile, 4.29 TOPS INT4 measured, 1.92 TOPS INT8 |
 
 ### Candidate sensors (not yet started)
 
